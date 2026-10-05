@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Packs the MSBuild SDK from the folder eng/build.ps1 stages ($(StageDir)): Sdk/, src/ (helpers compiled into each mod),
+    ref/ (abstractions and game bindings), analyzers/ and tools/ (the neorunex compiler with retoc and repak).
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>NeoRuneExtended.Sdk</PackageId>
+    <PackageType>MSBuildSdk</PackageType>
+    <Description>Write Minecraft Dungeons II mods in C#, with the game's own UI. This MSBuild project SDK compiles C# into Unreal Blueprint bytecode and packs it as a mod: dotnet build type-checks, compiles, packs and installs it. Based on NeoRune.</Description>
+    <PackageTags>minecraft-dungeons-2 modding unreal-engine blueprint kismet roslyn</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <NoWarn>$(NoWarn);NU5100;NU5128</NoWarn>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <StageDir Condition="'$(StageDir)' == ''">$(RepoRoot)artifacts\stage\sdk\</StageDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="$(StageDir)**\*" Pack="true" PackagePath="" />
+    <None Include="$(RepoRoot)README.md;$(RepoRoot)LICENSE;$(RepoRoot)THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw "Tag ${{ github.ref_name }} is not vX.Y.Z" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build packages
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File eng/build.ps1 -Version ${{ steps.version.outputs.version }}
+
+      - name: Test
+        shell: pwsh
+        run: |
+          $packages = "$env:GITHUB_WORKSPACE\artifacts\packages"
+          $mod = "$env:RUNNER_TEMP\TestMod"
+          dotnet new install "$packages\NeoRuneExtended.Templates.${{ steps.version.outputs.version }}.nupkg"
+          dotnet new neorunex-mod -n TestMod -o $mod
+          @"
+          <configuration>
+            <packageSources>
+              <add key="NeoRuneExtended" value="$packages" />
+            </packageSources>
+          </configuration>
+          "@ | Set-Content "$mod\nuget.config"
+          dotnet build $mod -p:NeoRuneInstall=false
+          if ($LASTEXITCODE -ne 0) { throw "the template mod did not build" }
+          if (-not (Test-Path "$mod\bin\NeoRune\Pak\TestMod_P.utoc")) { throw "the template mod was not packed" }
+
+      - name: Log in to nuget.org
+        id: nuget
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to nuget.org
+        shell: pwsh
+        run: |
+          foreach ($id in 'Sdk', 'Tool', 'Templates') {
+            dotnet nuget push "artifacts/packages/NeoRuneExtended.$id.${{ steps.version.outputs.version }}.nupkg" `
+              --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+            if ($LASTEXITCODE -ne 0) { throw "push of NeoRuneExtended.$id failed" }
+          }
+
+      - name: GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $ghArgs = @('release', 'create', '${{ github.ref_name }}') + (Get-ChildItem "artifacts/packages/*.$version.nupkg").FullName
+          $ghArgs += '--title', "NeoRuneExtended $version", '--generate-notes'
+          if ($version.Contains('-')) { $ghArgs += '--prerelease' }   # e.g. v0.2.0-beta.1
+          gh @ghArgs
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }

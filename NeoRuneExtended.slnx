@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NeoRuneExtended.Abstractions/NeoRuneExtended.Abstractions.csproj" />
+    <Project Path="src/NeoRuneExtended.Analyzers/NeoRuneExtended.Analyzers.csproj" />
+    <Project Path="src/NeoRuneExtended.Assets/NeoRuneExtended.Assets.csproj" />
+    <Project Path="src/NeoRuneExtended.Bindings/NeoRuneExtended.Bindings.csproj" />
+    <Project Path="src/NeoRuneExtended.Cli/NeoRuneExtended.Cli.csproj" />
+    <Project Path="src/NeoRuneExtended.Compiler/NeoRuneExtended.Compiler.csproj" />
+    <Project Path="src/NeoRuneExtended.Discovery/NeoRuneExtended.Discovery.csproj" />
+    <Project Path="src/NeoRuneExtended.Packaging/NeoRuneExtended.Packaging.csproj" />
+  </Folder>
+</Solution>

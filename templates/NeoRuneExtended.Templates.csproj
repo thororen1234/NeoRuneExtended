@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Packs the templates eng/build.ps1 stages ($(StageDir)), with the SDK version stamped in as the default. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>NeoRuneExtended.Templates</PackageId>
+    <PackageType>Template</PackageType>
+    <Description>dotnet new templates for NeoRuneExtended mods for Minecraft Dungeons II: dotnet new neorunex-mod -n MyMod</Description>
+    <PackageTags>minecraft-dungeons-2 modding dotnet-new templates</PackageTags>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <StageDir Condition="'$(StageDir)' == ''">$(RepoRoot)artifacts\stage\templates\</StageDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="$(StageDir)**\*" Pack="true" PackagePath="content" />
+    <None Include="$(RepoRoot)LICENSE" Pack="true" PackagePath="" />
+  </ItemGroup>
+</Project>

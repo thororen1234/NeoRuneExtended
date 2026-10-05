@@ -1,0 +1,38 @@
+<Project>
+  <!-- NeoRuneExtended MSBuild SDK: a mod project is <Project Sdk="NeoRuneExtended.Sdk/x.y.z">. -->
+  <PropertyGroup>
+    <NeoRuneSdkRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..'))</NeoRuneSdkRoot>
+    <UsingNeoRuneSdk>true</UsingNeoRuneSdk>
+    <UsingNeoRuneExtendedSdk>true</UsingNeoRuneExtendedSdk>
+  </PropertyGroup>
+
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <!-- The C# assembly never runs: it only gives the IDE and the compiler type information. -->
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net$(BundledNETCoreAppTargetFrameworkVersion)</TargetFramework>
+    <OutputType>Library</OutputType>
+    <LangVersion Condition="'$(LangVersion)' == ''">latest</LangVersion>
+    <Nullable Condition="'$(Nullable)' == ''">enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <NoWarn>$(NoWarn);CS8618;CS0649</NoWarn>
+
+    <!-- The property names stay NeoRune*, so projects and build steps written for NeoRune keep working. -->
+    <!-- Folder name under Content/Mods; must be unique among installed mods. -->
+    <NeoRuneModName Condition="'$(NeoRuneModName)' == ''">$(MSBuildProjectName)</NeoRuneModName>
+    <!-- Shown in the Mods tab of the game's settings (Blueprint Loader 2.0). The title defaults to the mod name and the
+         version to <Version>; also NeoRuneModAuthor, NeoRuneModAuthorUrl and NeoRuneModDescription. A line break in the
+         description is written 
+. -->
+    <NeoRuneModTitle Condition="'$(NeoRuneModTitle)' == ''">$(NeoRuneModName)</NeoRuneModTitle>
+    <!-- Copy the built mod into the game's Paks/~mods folder after each build. -->
+    <NeoRuneInstall Condition="'$(NeoRuneInstall)' == ''">true</NeoRuneInstall>
+    <!-- Game install folder (the one containing "Dungeons"); found automatically in Steam and Xbox app libraries when empty. -->
+    <NeoRuneGameDir Condition="'$(NeoRuneGameDir)' == ''"></NeoRuneGameDir>
+    <!-- Warn (NR0003) when the installed game is a different build from the one this SDK's bindings were made for. -->
+    <NeoRuneCheckGameBuild Condition="'$(NeoRuneCheckGameBuild)' == ''">true</NeoRuneCheckGameBuild>
+    <NeoRuneOutDir Condition="'$(NeoRuneOutDir)' == ''">$(MSBuildProjectDirectory)\bin\NeoRune\</NeoRuneOutDir>
+  </PropertyGroup>
+</Project>

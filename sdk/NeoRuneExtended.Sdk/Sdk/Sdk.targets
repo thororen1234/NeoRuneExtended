@@ -1,0 +1,66 @@
+<Project>
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <_NeoRuneTool>$(NeoRuneSdkRoot)tools\neorunex.dll</_NeoRuneTool>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="NeoRune.Abstractions" HintPath="$(NeoRuneSdkRoot)ref\NeoRune.Abstractions.dll" Private="false" />
+    <Reference Include="NeoRune.Game" HintPath="$(NeoRuneSdkRoot)ref\NeoRune.Game.dll" Private="false" />
+    <!-- Flags unsupported C# in the editor while typing (NR1xxx). -->
+    <Analyzer Include="$(NeoRuneSdkRoot)analyzers\NeoRuneExtended.Analyzers.dll" />
+    <!-- SDK helpers (Log, Timer, World, GameUI...) are compiled together with the mod. -->
+    <Compile Include="$(NeoRuneSdkRoot)src\**\*.cs" Link="NeoRuneExtended.Sdk\%(RecursiveDir)%(Filename)%(Extension)" Visible="false" />
+  </ItemGroup>
+
+  <!-- After the normal C# build: compile to Blueprint bytecode and pack (only when inputs changed), then install. -->
+  <Target Name="_NeoRunePrepare" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildingForLiveUnitTesting)' != 'true'">
+    <PropertyGroup>
+      <NeoRuneModVersion Condition="'$(NeoRuneModVersion)' == ''">$(Version)</NeoRuneModVersion>
+      <_NeoRuneRsp>$(IntermediateOutputPath)neorune.rsp</_NeoRuneRsp>
+      <_NeoRunePak>$(NeoRuneOutDir)Pak\$(NeoRuneModName)_P.utoc</_NeoRunePak>
+    </PropertyGroup>
+    <ItemGroup>
+      <_NeoRuneLine Include="build" />
+      <_NeoRuneLine Include="--mod=$(NeoRuneModName)" />
+      <_NeoRuneLine Include="--out=$(NeoRuneOutDir)" />
+      <_NeoRuneLine Include="--tools=$(NeoRuneSdkRoot)tools" />
+      <!-- What Blueprint Loader 2.0 shows in the Mods tab (escaped: MSBuild items split at semicolons). -->
+      <_NeoRuneLine Include="--title=$([MSBuild]::Escape('$(NeoRuneModTitle)'))" Condition="'$(NeoRuneModTitle)' != ''" />
+      <_NeoRuneLine Include="--version=$([MSBuild]::Escape('$(NeoRuneModVersion)'))" Condition="'$(NeoRuneModVersion)' != ''" />
+      <_NeoRuneLine Include="--author=$([MSBuild]::Escape('$(NeoRuneModAuthor)'))" Condition="'$(NeoRuneModAuthor)' != ''" />
+      <_NeoRuneLine Include="--author-url=$([MSBuild]::Escape('$(NeoRuneModAuthorUrl)'))" Condition="'$(NeoRuneModAuthorUrl)' != ''" />
+      <_NeoRuneLine Include="--description=$([MSBuild]::Escape('$(NeoRuneModDescription)'))" Condition="'$(NeoRuneModDescription)' != ''" />
+      <_NeoRuneLine Include="@(Compile->'--source=%(FullPath)')" />
+      <_NeoRuneLine Include="@(ReferencePath->'--ref=%(FullPath)')" />
+    </ItemGroup>
+    <!-- Only rewritten when the arguments change, so it can serve as an input below. -->
+    <WriteLinesToFile File="$(_NeoRuneRsp)" Lines="@(_NeoRuneLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+
+  <Target Name="NeoRuneCompile" AfterTargets="_NeoRunePrepare" Condition="'$(_NeoRuneRsp)' != ''"
+          Inputs="@(Compile);@(ReferencePath);$(_NeoRuneRsp);$(MSBuildProjectFullPath);$(_NeoRuneTool)"
+          Outputs="$(_NeoRunePak)">
+    <!-- Errors are printed as "file(line,col): error NR...", which MSBuild and IDEs pick up. -->
+    <Exec Command="dotnet &quot;$(_NeoRuneTool)&quot; @&quot;$(_NeoRuneRsp)&quot;" IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="high">
+      <Output TaskParameter="ExitCode" PropertyName="_NeoRuneExitCode" />
+      <Output TaskParameter="ConsoleOutput" PropertyName="_NeoRuneOutput" />
+    </Exec>
+    <Error Condition="'$(_NeoRuneExitCode)' != '0' and !$(_NeoRuneOutput.Contains('error NR'))" Text="NeoRuneExtended failed (exit code $(_NeoRuneExitCode)): $(_NeoRuneOutput)" />
+  </Target>
+
+  <!-- Runs on every build (cheap): copies the pak into ~mods if it changed and the game is closed. -->
+  <Target Name="NeoRuneInstall" AfterTargets="NeoRuneCompile" Condition="'$(_NeoRuneRsp)' != '' and '$(NeoRuneInstall)' == 'true'">
+    <PropertyGroup>
+      <_NeoRuneGameArg Condition="'$(NeoRuneGameDir)' != ''"> --game &quot;$(NeoRuneGameDir)&quot;</_NeoRuneGameArg>
+      <!-- Warns NR0003 when the installed game is not the build the bindings were made from. -->
+      <_NeoRuneBindingsArg Condition="'$(NeoRuneCheckGameBuild)' != 'false' and Exists('$(NeoRuneSdkRoot)ref\NeoRune.Game.json')"> --bindings &quot;$(NeoRuneSdkRoot)ref\NeoRune.Game.json&quot;</_NeoRuneBindingsArg>
+    </PropertyGroup>
+    <Exec Command="dotnet &quot;$(_NeoRuneTool)&quot; install --mod $(NeoRuneModName) --pak &quot;$(NeoRuneOutDir)Pak&quot;$(_NeoRuneGameArg)$(_NeoRuneBindingsArg)" StandardOutputImportance="high" />
+  </Target>
+
+  <Target Name="NeoRuneClean" AfterTargets="Clean">
+    <RemoveDir Directories="$(NeoRuneOutDir)" />
+  </Target>
+</Project>

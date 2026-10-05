@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "thororen",
+  "classifications": [ "Game", "Mod", "Minecraft Dungeons II" ],
+  "identity": "NeoRuneExtended.Mod",
+  "name": "NeoRuneExtended mod for Minecraft Dungeons II",
+  "shortName": "neorunex-mod",
+  "sourceName": "MyMod",
+  "preferNameDirectory": true,
+  "tags": { "language": "C#", "type": "project" },
+  "symbols": {
+    "SdkVersion": {
+      "type": "parameter",
+      "datatype": "text",
+      "defaultValue": "NEORUNEX_TEMPLATE_VERSION",
+      "replaces": "NEORUNE_SDK_VERSION",
+      "description": "NeoRuneExtended.Sdk version to use."
+    }
+  }
+}

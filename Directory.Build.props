@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup>
+    <Version Condition="'$(Version)' == ''">0.1.0</Version>
+    <Authors>thororen</Authors>
+    <Company>thororen</Company>
+    <Product>NeoRuneExtended</Product>
+    <Copyright>Copyright (c) 2026 thororen. Based on NeoRune, Copyright (c) 2026 NeoMakesGames / NeoPlayzGames.</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/thororen1234/NeoRuneExtended</RepositoryUrl>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Decompiled code: nullability and unused-variable warnings are expected until each file is cleaned up. -->
+    <NoWarn>$(NoWarn);CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8619;CS8620;CS8625;CS8629;CS8714;CS8765;CS8767;CS0162;CS0168;CS0219;CS1998</NoWarn>
+    <RepoRoot>$(MSBuildThisFileDirectory)</RepoRoot>
+  </PropertyGroup>
+</Project>

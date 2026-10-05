@@ -1,0 +1,15 @@
+<Project Sdk="NeoRuneExtended.Sdk/NEORUNE_SDK_VERSION">
+  <!--
+    dotnet build   compiles the mod and installs it into the game's Paks\~mods\MyMod folder.
+    Close the game before building: it locks the mod files while running.
+    Optional settings:
+      <NeoRuneModName>MyMod</NeoRuneModName>        folder name under Content/Mods (default: project name)
+      <NeoRuneInstall>false</NeoRuneInstall>        only build, don't copy into the game
+      <NeoRuneGameDir>D:\Games\Minecraft Dungeons II</NeoRuneGameDir>   if the game is not found automatically
+    Shown in the Mods tab of the game's settings (Blueprint Loader 2.0):
+      <NeoRuneModTitle>My Mod</NeoRuneModTitle>      (default: the mod name)
+      <Version>1.0</Version>
+      <NeoRuneModAuthor>you</NeoRuneModAuthor>  <NeoRuneModAuthorUrl>https://...</NeoRuneModAuthorUrl>
+      <NeoRuneModDescription>What it does.\nA second line.</NeoRuneModDescription>
+  -->
+</Project>

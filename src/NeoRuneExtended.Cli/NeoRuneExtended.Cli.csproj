@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>neorunex</AssemblyName>
+    <RootNamespace>NeoRuneExtended.Cli</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RollForward>Major</RollForward>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>neorunex</ToolCommandName>
+    <PackageId>NeoRuneExtended.Tool</PackageId>
+    <Description>The NeoRuneExtended command line: read mod logs (neorunex log), check your setup (neorunex doctor), disassemble packages, and dump and diff the game's API after a patch.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../NeoRuneExtended.Compiler/NeoRuneExtended.Compiler.csproj" />
+    <ProjectReference Include="../NeoRuneExtended.Bindings/NeoRuneExtended.Bindings.csproj" />
+    <ProjectReference Include="../NeoRuneExtended.Packaging/NeoRuneExtended.Packaging.csproj" />
+    <Reference Include="UAssetAPI" HintPath="$(RepoRoot)lib/UAssetAPI/UAssetAPI.dll" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- retoc and repak pack the mod: the tool looks for them next to itself. -->
+    <None Include="$(RepoRoot)tools/*.exe" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(RepoRoot)third-party/*LICENSE*" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
