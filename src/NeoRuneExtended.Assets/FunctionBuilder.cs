@@ -16,7 +16,9 @@ public sealed class FunctionBuilder
 
 	private readonly List<FProperty> locals = new List<FProperty>();
 
-	private readonly Dictionary<string, UType> types = new Dictionary<string, UType>();
+	// By Unreal name: names are case-insensitive there, and "none" is renamed (PackageBuilder.PropertyName), so two that
+	// differ only that way would be one property.
+	private readonly Dictionary<string, UType> types = new Dictionary<string, UType>(StringComparer.OrdinalIgnoreCase);
 
 	public BlueprintBuilder Owner { get; }
 
@@ -55,12 +57,12 @@ public sealed class FunctionBuilder
 
 	public bool HasLocal(string name)
 	{
-		return types.ContainsKey(name);
+		return types.ContainsKey(PackageBuilder.PropertyName(name));
 	}
 
 	public UType TypeOf(string name)
 	{
-		return types[name];
+		return types[PackageBuilder.PropertyName(name)];
 	}
 
 	public void AddParameter(string name, UType type, bool isOut = false, bool isReturn = false, bool isConstRef = false)
@@ -79,7 +81,7 @@ public sealed class FunctionBuilder
 			ePropertyFlags |= EPropertyFlags.CPF_ConstParm | EPropertyFlags.CPF_OutParm | EPropertyFlags.CPF_ReferenceParm;
 		}
 		parameters.Add(Owner.Package.Property(name, type, ePropertyFlags));
-		types[name] = type;
+		types[PackageBuilder.PropertyName(name)] = type;
 		if (isReturn)
 		{
 			ReturnValueName = name;
@@ -92,12 +94,12 @@ public sealed class FunctionBuilder
 
 	public void AddLocal(string name, UType type)
 	{
-		if (types.ContainsKey(name))
+		if (types.ContainsKey(PackageBuilder.PropertyName(name)))
 		{
 			throw new InvalidOperationException("Duplicate local " + name + " in " + Name);
 		}
 		locals.Add(Owner.Package.Property(name, type, EPropertyFlags.CPF_None));
-		types[name] = type;
+		types[PackageBuilder.PropertyName(name)] = type;
 	}
 
 	internal void Finish()

@@ -365,7 +365,7 @@ public sealed class PackageBuilder
 		}
 		FProperty fProperty2 = fProperty;
 		fProperty2.SerializedType = Name(type.PropertyType);
-		fProperty2.Name = Name(name);
+		fProperty2.Name = Name(PropertyName(name));
 		fProperty2.Flags = (EObjectFlags)(1 | ((!flags.HasFlag(EPropertyFlags.CPF_Parm)) ? 2097152 : 0));
 		fProperty2.ArrayDim = EArrayDim.TArray;
 		fProperty2.ElementSize = type.Size;
@@ -373,6 +373,21 @@ public sealed class PackageBuilder
 		fProperty2.RepNotifyFunc = Name("None");
 		fProperty2.BlueprintReplicationCondition = ELifetimeCondition.COND_None;
 		return fProperty2;
+	}
+
+	/// <summary>
+	/// The Unreal name of a property of the mod's (a field, parameter or local). Names are case-insensitive, so one called
+	/// "none" is NAME_None, the empty name: bytecode that refers to it finds nothing, and the VM writes its value into an
+	/// uninitialized buffer (a struct there crashed the game). Those get another name; <see cref="ScriptBuilder.Pointer"/>
+	/// uses the same one.
+	/// </summary>
+	public static string PropertyName(string name)
+	{
+		if (!string.Equals(name, "None", StringComparison.OrdinalIgnoreCase))
+		{
+			return name;
+		}
+		return name + "_";
 	}
 
 	private static EPropertyFlags InnerFlags(EPropertyFlags outer)

@@ -139,7 +139,7 @@ public sealed class ScriptBuilder
 
 	public KismetPropertyPointer Pointer(string propertyName, FPackageIndex owner)
 	{
-		return new KismetPropertyPointer(new FFieldPath(new FName[1] { P.Name(propertyName) }, owner));
+		return new KismetPropertyPointer(new FFieldPath(new FName[1] { P.Name(PackageBuilder.PropertyName(propertyName)) }, owner));
 	}
 
 	public EX_VariableBase Local(string name, bool outParam = false)
