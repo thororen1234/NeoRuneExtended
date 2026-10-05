@@ -69,8 +69,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = '${{ steps.version.outputs.version }}'
-          $ghArgs = @('release', 'create', '${{ github.ref_name }}') + (Get-ChildItem "artifacts/packages/*.$version.nupkg").FullName
-          $ghArgs += '--title', "NeoRuneExtended $version", '--generate-notes'
-          if ($version.Contains('-')) { $ghArgs += '--prerelease' }   # e.g. v0.2.0-beta.1
-          gh @ghArgs
-          if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
+          $tag = '${{ github.ref_name }}'
+          $files = (Get-ChildItem "artifacts/packages/*.$version.nupkg").FullName
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @files --clobber
+            if ($LASTEXITCODE -ne 0) { throw "gh release upload failed" }
+          } else {
+            $ghArgs = @('release', 'create', $tag) + $files
+            $ghArgs += '--title', "NeoRuneExtended $version", '--generate-notes'
+            if ($version.Contains('-')) { $ghArgs += '--prerelease' }   # e.g. v0.2.0-beta.1
+            gh @ghArgs
+            if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
+          }
