@@ -209,7 +209,7 @@ internal sealed class ClassCompiler
 	{
 		foreach (INamedTypeSymbol allInterface in Type.AllInterfaces)
 		{
-			string text = NeoRuneExtended.Compiler.Symbols.ClassPathAttr(allInterface);
+			string text = NeoRuneExtended.Compiler.Symbols.InterfacePath(allInterface);
 			if (text == null)
 			{
 				continue;
@@ -243,7 +243,7 @@ internal sealed class ClassCompiler
 
 	private IMethodSymbol? InterfaceMember(IMethodSymbol m)
 	{
-		return Type.AllInterfaces.Where((INamedTypeSymbol i) => NeoRuneExtended.Compiler.Symbols.ClassPathAttr(i) != null).SelectMany((INamedTypeSymbol i) => i.GetMembers().OfType<IMethodSymbol>()).FirstOrDefault((IMethodSymbol member) => SymbolEqualityComparer.Default.Equals(Type.FindImplementationForInterfaceMember(member), m));
+		return Type.AllInterfaces.Where((INamedTypeSymbol i) => NeoRuneExtended.Compiler.Symbols.InterfacePath(i) != null).SelectMany((INamedTypeSymbol i) => i.GetMembers().OfType<IMethodSymbol>()).FirstOrDefault((IMethodSymbol member) => SymbolEqualityComparer.Default.Equals(Type.FindImplementationForInterfaceMember(member), m));
 	}
 
 	public bool Drain()

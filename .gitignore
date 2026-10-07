@@ -4,3 +4,4 @@ artifacts/
 decompiled/
 *.user
 .vs/
+tools/oo2core_*.dll

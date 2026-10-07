@@ -131,7 +131,7 @@ public sealed class ModCompiler
 		{
 			return false;
 		}
-		if (settings.Any((ModSettingData s) => s.Id != null) && !modActor.AllInterfaces.Any((INamedTypeSymbol i) => i.Name == "IModSettings" && IsSdkClass(i)))
+		if (settings.Any((ModSettingData s) => s.Id != null) && !modActor.AllInterfaces.Any((INamedTypeSymbol i) => (i.Name == "IModSettings" && IsSdkClass(i)) || NeoRuneExtended.Compiler.Symbols.InterfacePath(i) == "/Game/Mods/BlueprintLoader/BPI_ModSettings.BPI_ModSettings_C"))
 		{
 			Diagnostics.Add(ModDiagnostic.From("warning", "ModActor has settings but doesn't implement IModSettings, so it never gets their values", modActor.Locations.FirstOrDefault()));
 		}

@@ -893,13 +893,7 @@ internal sealed class FunctionCompiler
 								}
 								return localVar2;
 							}
-							FPackageIndex index = ClassImport(isTypeOperation.TypeOperand, op);
-							EX_DynamicCast eX_DynamicCast = new EX_DynamicCast
-							{
-								ClassPtr = s.Ref(index),
-								Target = Read(Lower(isTypeOperation.ValueOperand))
-							};
-							return new RValue(CallMath(LibFn("UKismetSystemLibrary", "IsValid"), eX_DynamicCast), UType.Bool);
+							return new RValue(IsA(TypeClassPath(isTypeOperation.TypeOperand, op), Read(Lower(isTypeOperation.ValueOperand))), UType.Bool);
 						}
 						if (conditionalInstances.Count <= 0)
 						{
@@ -2881,11 +2875,7 @@ internal sealed class FunctionCompiler
 				{
 					return kismetExpression;
 				}
-				return new EX_DynamicCast
-				{
-					ClassPtr = s.Ref(pkg.ImportClass(obj2.ClassPath)),
-					Target = kismetExpression
-				};
+				return CastTo(obj2.ClassPath, kismetExpression);
 			}
 			if (to is UType.Class)
 			{
@@ -3061,6 +3051,50 @@ internal sealed class FunctionCompiler
 		return pkg.ImportClass(sym.ClassPath(t) ?? throw Error(at, $"'{t}' is not an Unreal class"));
 	}
 
+	/// <summary>
+	/// Whether obj is of the class (and not null). For an interface this asks DoesImplementInterface instead of
+	/// EX_DynamicCast: cast to an interface, the VM writes an FScriptInterface (16 bytes) where the compiler keeps an
+	/// object (8 bytes), overwriting what follows. With an object that implements the interface that is its own address,
+	/// and it ended up corrupting the vtable pointer of mods' actors implementing IModSettings (crashing on their next
+	/// timer or delegate call).
+	/// </summary>
+	private KismetExpression IsA(string classPath, KismetExpression obj)
+	{
+		FPackageIndex index = pkg.ImportClass(classPath);
+		if (sym.IsInterface(classPath))
+		{
+			return CallMath("UKismetSystemLibrary", "DoesImplementInterface", obj, s.Object(index));
+		}
+		return CallMath("UKismetSystemLibrary", "IsValid", new EX_DynamicCast
+		{
+			ClassPtr = s.Ref(index),
+			Target = obj
+		});
+	}
+
+	/// <summary>obj cast to the class, or null; for an interface without EX_DynamicCast (see <see cref="IsA"/>).</summary>
+	private KismetExpression CastTo(string classPath, KismetExpression obj)
+	{
+		FPackageIndex index = pkg.ImportClass(classPath);
+		if (!sym.IsInterface(classPath))
+		{
+			return new EX_DynamicCast
+			{
+				ClassPtr = s.Ref(index),
+				Target = obj
+			};
+		}
+		LocalVar localVar = Temp(new UType.Object(classPath));
+		Store(localVar, obj);
+		return CallMath("UKismetMathLibrary", "SelectObject", localVar.Expr(s), ScriptBuilder.NoObject(), CallMath("UKismetSystemLibrary", "DoesImplementInterface", localVar.Expr(s), s.Object(index)));
+	}
+
+	private string TypeClassPath(ITypeSymbol t, IOperation at)
+	{
+		sym.Map(t);
+		return sym.ClassPath(t) ?? throw Error(at, $"'{t}' is not an Unreal class");
+	}
+
 	private Value? ConditionalAccess(IConditionalAccessOperation ca, bool wantValue)
 	{
 		Var var = AsVar(Lower(ca.Operation));
@@ -3148,18 +3182,9 @@ internal sealed class FunctionCompiler
 				}
 				return new RValue(CallMath("UKismetMathLibrary", "Not_PreBool", Read(Pattern(value, negatedPatternOperation.Pattern, ip))), UType.Bool);
 			}
-			EX_DynamicCast eX_DynamicCast = new EX_DynamicCast
-			{
-				ClassPtr = s.Ref(ClassImport(typePatternOperation.MatchedType, ip)),
-				Target = Read(value)
-			};
-			return new RValue(CallMath("UKismetSystemLibrary", "IsValid", eX_DynamicCast), UType.Bool);
+			return new RValue(IsA(TypeClassPath(typePatternOperation.MatchedType, ip), Read(value)), UType.Bool);
 		}
-		EX_DynamicCast value3 = new EX_DynamicCast
-		{
-			ClassPtr = s.Ref(ClassImport(declarationPatternOperation.MatchedType, ip)),
-			Target = Read(value)
-		};
+		KismetExpression value3 = CastTo(TypeClassPath(declarationPatternOperation.MatchedType, ip), Read(value));
 		Var var = ((declarationPatternOperation.DeclaredSymbol is ILocalSymbol local) ? DeclareLocal(local, ip) : Temp(new UType.Object(sym.ClassPath(declarationPatternOperation.MatchedType))));
 		Store(var, value3);
 		return new RValue(CallMath("UKismetSystemLibrary", "IsValid", var.Expr(s)), UType.Bool);

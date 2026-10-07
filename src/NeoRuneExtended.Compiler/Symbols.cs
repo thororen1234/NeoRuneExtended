@@ -39,6 +39,30 @@ public sealed class Symbols
 		return Attr(t, "UClassAttribute")?.ConstructorArguments[0].Value as string;
 	}
 
+	/// <summary>
+	/// The class path of an interface a class can implement: a game interface ([UClass]) or a Blueprint interface the mod
+	/// generates ([Asset]), or null.
+	/// </summary>
+	public static string? InterfacePath(INamedTypeSymbol i)
+	{
+		string? path = ClassPathAttr(i);
+		if (path != null)
+		{
+			return path;
+		}
+		string? package = (i.TypeKind == TypeKind.Interface && IsSource(i)) ? AssetPackage(i) : null;
+		return (package != null) ? $"{package}.{AssetName(package)}_C" : null;
+	}
+
+	// Class paths of interfaces (game or mod) seen by Map: a cast to one of them must not be an EX_DynamicCast.
+	private readonly HashSet<string> interfacePaths = new HashSet<string>();
+
+	/// <summary>Whether the class path is an interface's.</summary>
+	public bool IsInterface(string classPath)
+	{
+		return interfacePaths.Contains(classPath);
+	}
+
 	/// <summary>The package path of a mod type with [Asset], or null.</summary>
 	public static string? AssetPackage(ITypeSymbol t)
 	{
@@ -418,6 +442,10 @@ public sealed class Symbols
 				string text8 = ClassPath(namedTypeSymbol);
 				if (text8 != null)
 				{
+					if (typeKind == TypeKind.Interface)
+					{
+						interfacePaths.Add(text8);
+					}
 					return new UType.Object(text8);
 				}
 			}
