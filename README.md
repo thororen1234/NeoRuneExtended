@@ -2,7 +2,7 @@
 
 **Write Minecraft Dungeons II mods in C#, using the game's own UI.** NeoRuneExtended compiles C# into Blueprint bytecode and packs it as an ordinary Blueprint mod, loaded by [BetterBlueprintLoader](https://github.com/thororen1234/MCDII-JustKeepRollin/tree/main/BetterBlueprintLoader) or [Blueprint Loader](https://www.nexusmods.com/minecraftdungeons2/mods/2). You only need the .NET SDK: no Unreal Engine and no injection.
 
-It's a fork of [NeoRune](https://www.nuget.org/packages/NeoRune.Sdk) 0.4. Everything NeoRune does works the same way, and mods built with it compile to identical packages. NeoRuneExtended adds the things NeoRune can't do:
+It's a fork of [NeoRune](https://www.nuget.org/packages/NeoRune.Sdk). Everything NeoRune does works the same way, and mods built with it compile to identical packages. NeoRuneExtended adds the things NeoRune can't do:
 
 - **Add to the game's screens.** Put your widgets into the game's own UI slots (HUD, quest tracker, minimap, toasts, the system menu) or into a named panel of any screen (inventory, collectibles, settings).
 - **Real game menus.** Push your menu onto the game's menu layers, so Esc/B closes it, the game's input routing applies and its fades cover it.
@@ -32,7 +32,7 @@ dotnet build
 Change the first line of the `.csproj`:
 
 ```xml
-<Project Sdk="NeoRuneExtended.Sdk/0.1.0">
+<Project Sdk="NeoRuneExtended.Sdk/0.4.2">
 ```
 
 The `NeoRune` namespace (`Log`, `Timer`, `World`, `Unreal`...), the `UE.*` game API and the `NeoRune*` MSBuild properties are unchanged.
@@ -61,7 +61,7 @@ There are also `Heading`, `Text`, `Spacer`, `Select`, `TextInput`, `Colour`, `Ur
 ## Building NeoRuneExtended
 
 ```
-powershell -ExecutionPolicy Bypass -File eng/build.ps1 [-Version 0.1.0]
+powershell -ExecutionPolicy Bypass -File eng/build.ps1 [-Version 0.4.2]
 ```
 
 writes `NeoRuneExtended.Sdk`, `NeoRuneExtended.Tool` and `NeoRuneExtended.Templates` to `artifacts/packages`. To use them before they're on NuGet, add that folder as a package source next to your mods:

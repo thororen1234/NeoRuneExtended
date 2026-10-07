@@ -12,20 +12,44 @@ namespace NeoRune
     /// </summary>
     public class NeoRuneWatermark : ScreenWidget
     {
+        /// <summary>Actor tag of every NeoRune mod's ModActor, so the mark can count them.</summary>
+        const string ModTag = "NeoRuneMod";
+
+        UTextBlock? text;
+
         public static void Show(UObject context)
         {
-            if (!World.LevelName(context).StartsWith("Menu") || IsShown(context)) return;
+            if (context is AActor modActor)
+            {
+                var tags = modActor.Tags;
+                tags.Add(ModTag);
+                modActor.Tags = tags;
+            }
+            if (!World.LevelName(context).StartsWith("Menu")) return;
+            // Take over from a mark already shown: it may be from a mod built before the count (those never replace a
+            // shown mark). Collapsed rather than removed, since a shown ScreenWidget puts itself back.
+            HideOthers(context);
             var mark = UWidgetBlueprintLibrary.Create(context, Unreal.ClassOf<NeoRuneWatermark>(), World.PlayerController(context)) as NeoRuneWatermark;
-            if (mark != null && mark.Build()) mark.ShowAt(new FVector2D { X = 16, Y = 16 });
+            if (mark == null || !mark.Build()) return;
+            mark.ShowAt(new FVector2D { X = 16, Y = 16 });
+            // Mods are spawned one after another: recount until they've all started.
+            mark.Count();
+            Timer.Start(mark, nameof(Count), 1f, loop: true);
         }
 
-        /// <summary>Another mod's copy of this class is already on screen (each mod has its own, so compare by name).</summary>
-        static bool IsShown(UObject context)
+        /// <summary>Hides the marks other mods showed (each mod has its own copy of this class, so compare by name).</summary>
+        static void HideOthers(UObject context)
         {
             UWidgetBlueprintLibrary.GetAllWidgetsOfClass(context, out var widgets, Unreal.ClassOf<UUserWidget>(), true);
             foreach (var widget in widgets)
-                if (UKismetSystemLibrary.GetClassDisplayName(UGameplayStatics.GetObjectClass(widget)).StartsWith("NeoRuneWatermark")) return true;
-            return false;
+                if (UKismetSystemLibrary.GetClassDisplayName(UGameplayStatics.GetObjectClass(widget)).StartsWith("NeoRuneWatermark"))
+                    widget.SetVisibility(ESlateVisibility.Collapsed);
+        }
+
+        void Count()
+        {
+            UGameplayStatics.GetAllActorsWithTag(this, ModTag, out var mods);
+            text?.SetText(mods.Count == 1 ? "1 NeoRuneExtended mod loaded" : $"{mods.Count} NeoRuneExtended mods loaded");
         }
 
         bool Build()
@@ -36,15 +60,12 @@ namespace NeoRune
                 tree = UGameplayStatics.SpawnObject(Unreal.ClassOf<UWidgetTree>(), this) as UWidgetTree;
                 WidgetTree = tree;
             }
-            var text = UGameplayStatics.SpawnObject(Unreal.ClassOf<UTextBlock>(), tree) as UTextBlock;
+            text = UGameplayStatics.SpawnObject(Unreal.ClassOf<UTextBlock>(), tree) as UTextBlock;
             if (tree == null || text == null) return false;
             var font = UMinimapHelpersLibrary.GetDefaultFont();
-            if (font.FontObject != null)
-            {
-                font.Size = 14;
-                text.SetFont(font);
-            }
-            text.SetText("NeoRuneExtended mods loaded");
+            if (font.FontObject == null) font = text.Font;   // the game's font isn't loaded yet on the main menu
+            font.Size = 24;
+            text.SetFont(font);
             text.SetColorAndOpacity(new FSlateColor
             {
                 SpecifiedColor = new FLinearColor { R = 1, G = 1, B = 1, A = 0.45f },

@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <Version Condition="'$(Version)' == ''">0.1.0</Version>
+    <Version Condition="'$(Version)' == ''">0.4.2</Version>
     <Authors>thororen</Authors>
     <Company>thororen</Company>
     <Product>NeoRuneExtended</Product>
