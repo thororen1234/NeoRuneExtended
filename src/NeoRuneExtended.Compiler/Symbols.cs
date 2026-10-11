@@ -18,7 +18,17 @@ public sealed class Symbols
 
 	public INamedTypeSymbol? Dictionary { get; }
 
+	public SortedSet<string> UsedApi { get; } = new SortedSet<string>(StringComparer.Ordinal);
+
 	public event Action<INamedTypeSymbol>? SourceClassUsed;
+
+	private void Use(string? path)
+	{
+		if (path != null && !path.StartsWith(ModRoot, StringComparison.Ordinal))
+		{
+			UsedApi.Add(path);
+		}
+	}
 
 	public Symbols(Compilation compilation, string modRoot)
 	{
@@ -113,6 +123,10 @@ public sealed class Symbols
 		string text = ClassPathAttr(t);
 		if (text != null)
 		{
+			if (use)
+			{
+				Use(text);
+			}
 			return text;
 		}
 		if (t is INamedTypeSymbol namedTypeSymbol && IsSource(namedTypeSymbol) && namedTypeSymbol.TypeKind == TypeKind.Class)
@@ -143,6 +157,31 @@ public sealed class Symbols
 			}
 		}
 		return null;
+	}
+
+	public static bool IsSequence(INamedTypeSymbol n)
+	{
+		bool flag;
+		switch (n.MetadataName)
+		{
+		case "IEnumerable`1":
+		case "IReadOnlyList`1":
+		case "IReadOnlyCollection`1":
+			flag = true;
+			break;
+		default:
+			flag = false;
+			break;
+		}
+		if (!flag || !(n.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic"))
+		{
+			if (n.MetadataName == "IOrderedEnumerable`1")
+			{
+				return n.ContainingNamespace?.ToDisplayString() == "System.Linq";
+			}
+			return false;
+		}
+		return true;
 	}
 
 	public static bool IsModStruct(ITypeSymbol t)
@@ -218,14 +257,20 @@ public sealed class Symbols
 		return null;
 	}
 
-	public UFunctionInfo? Function(IMethodSymbol m)
+	public UFunctionInfo? Function(IMethodSymbol m, bool use = true)
 	{
 		AttributeData attributeData = Attr(m.OriginalDefinition, "UFunctionAttribute");
 		if (attributeData == null)
 		{
 			return null;
 		}
-		return new UFunctionInfo(ClassPathAttr(m.ContainingType) ?? throw new InvalidOperationException($"{m.ContainingType} has no UClass"), (string)attributeData.ConstructorArguments[0].Value, (uint)attributeData.ConstructorArguments[1].Value, UFunctionInfo.ParseSignature((string)attributeData.ConstructorArguments[2].Value), IsScriptOnly(m.OriginalDefinition));
+		string text = ClassPathAttr(m.ContainingType) ?? throw new InvalidOperationException($"{m.ContainingType} has no UClass");
+		if (use)
+		{
+			Use(text);
+			Use(text + ":" + (string)attributeData.ConstructorArguments[0].Value);
+		}
+		return new UFunctionInfo(text, (string)attributeData.ConstructorArguments[0].Value, (uint)attributeData.ConstructorArguments[1].Value, UFunctionInfo.ParseSignature((string)attributeData.ConstructorArguments[2].Value), IsScriptOnly(m.OriginalDefinition));
 	}
 
 	public (string Name, UType Type, string Owner)? Property(ISymbol s)
@@ -249,8 +294,10 @@ public sealed class Symbols
 			return null;
 		}
 		INamedTypeSymbol containingType2 = s.ContainingType;
-		string item = ((attributeData.ConstructorArguments.Length > 2 && attributeData.ConstructorArguments[2].Value is string text) ? text : ((containingType2.TypeKind == TypeKind.Struct) ? StructPath(containingType2) : ClassPathAttr(containingType2)));
-		return ((string)attributeData.ConstructorArguments[0].Value, UType.Parse((string)attributeData.ConstructorArguments[1].Value), item);
+		string text = ((attributeData.ConstructorArguments.Length > 2 && attributeData.ConstructorArguments[2].Value is string text2) ? text2 : ((containingType2.TypeKind == TypeKind.Struct) ? StructPath(containingType2) : ClassPathAttr(containingType2)));
+		Use(text);
+		Use(text + "." + (string)attributeData.ConstructorArguments[0].Value);
+		return ((string)attributeData.ConstructorArguments[0].Value, UType.Parse((string)attributeData.ConstructorArguments[1].Value), text);
 	}
 
 	public static string? StructPath(ITypeSymbol t)
@@ -312,9 +359,27 @@ public sealed class Symbols
 			return UType.String;
 		default:
 		{
+			if (t is IArrayTypeSymbol { Rank: 1 } arrayTypeSymbol)
+			{
+				UType uType = Map(arrayTypeSymbol.ElementType);
+				if ((object)uType == null)
+				{
+					return null;
+				}
+				return new UType.Array(uType);
+			}
 			if (!(t is INamedTypeSymbol namedTypeSymbol))
 			{
 				return null;
+			}
+			if (IsSequence(namedTypeSymbol))
+			{
+				UType uType2 = Map(namedTypeSymbol.TypeArguments[0]);
+				if ((object)uType2 == null)
+				{
+					return null;
+				}
+				return new UType.Array(uType2);
 			}
 			if (namedTypeSymbol.ContainingNamespace?.ToDisplayString() == "NeoRune")
 			{
@@ -365,31 +430,31 @@ public sealed class Symbols
 			INamedTypeSymbol originalDefinition = namedTypeSymbol.OriginalDefinition;
 			if (SymbolEqualityComparer.Default.Equals(originalDefinition, List))
 			{
-				UType uType = Map(namedTypeSymbol.TypeArguments[0]);
-				if ((object)uType == null)
+				UType uType3 = Map(namedTypeSymbol.TypeArguments[0]);
+				if ((object)uType3 == null)
 				{
 					return null;
 				}
-				return new UType.Array(uType);
+				return new UType.Array(uType3);
 			}
 			if (SymbolEqualityComparer.Default.Equals(originalDefinition, HashSet))
 			{
-				UType uType2 = Map(namedTypeSymbol.TypeArguments[0]);
-				if ((object)uType2 == null)
+				UType uType4 = Map(namedTypeSymbol.TypeArguments[0]);
+				if ((object)uType4 == null)
 				{
 					return null;
 				}
-				return new UType.Set(uType2);
+				return new UType.Set(uType4);
 			}
 			if (SymbolEqualityComparer.Default.Equals(originalDefinition, Dictionary))
 			{
-				UType uType3 = Map(namedTypeSymbol.TypeArguments[0]);
-				if ((object)uType3 != null)
+				UType uType5 = Map(namedTypeSymbol.TypeArguments[0]);
+				if ((object)uType5 != null)
 				{
-					UType uType4 = Map(namedTypeSymbol.TypeArguments[1]);
-					if ((object)uType4 != null)
+					UType uType6 = Map(namedTypeSymbol.TypeArguments[1]);
+					if ((object)uType6 != null)
 					{
-						return new UType.Map(uType3, uType4);
+						return new UType.Map(uType5, uType6);
 					}
 				}
 				return null;
@@ -399,6 +464,7 @@ public sealed class Symbols
 				string text5 = EnumPath(namedTypeSymbol);
 				if (text5 != null)
 				{
+					Use(text5);
 					return new UType.Enum(text5);
 				}
 				// A user enum the mod generates ([Asset]): a byte property with the enum, like Blueprint enums.
@@ -421,6 +487,7 @@ public sealed class Symbols
 				string text6 = StructPath(namedTypeSymbol);
 				if (text6 != null)
 				{
+					Use(text6);
 					return new UType.Struct(text6, StructSize(namedTypeSymbol));
 				}
 			}

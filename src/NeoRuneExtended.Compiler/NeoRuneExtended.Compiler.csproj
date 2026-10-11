@@ -8,4 +8,9 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
     <ProjectReference Include="../NeoRuneExtended.Assets/NeoRuneExtended.Assets.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The main-menu mark compiled into every mod: mod code (UE.* types), so not part of the compiler itself. -->
+    <Compile Remove="NeoRune.Embedded.NeoRuneMark.cs" />
+    <EmbeddedResource Include="NeoRune.Embedded.NeoRuneMark.cs" LogicalName="NeoRune.Embedded.NeoRuneMark.cs" />
+  </ItemGroup>
 </Project>

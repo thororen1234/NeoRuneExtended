@@ -17,7 +17,7 @@ namespace NeoRune
     /// <summary>
     /// Debug log for mods. Shipping builds ignore Print String, so lines are appended to
     /// %LOCALAPPDATA%\Dungeons2\Saved\SaveGames\NeoRune_&lt;Mod&gt;.sav (Steam) or the Xbox app version's save storage;
-    /// read them with "neorune log &lt;Mod&gt;", which looks in both, or on screen with <see cref="Show"/>.
+    /// read them with "neorunex log &lt;Mod&gt;", which looks in both, or on screen with <see cref="Show"/>.
     /// Each Write saves the file: to log every frame, use a <see cref="LogBuffer"/>.
     /// </summary>
     public static class Log

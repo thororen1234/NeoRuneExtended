@@ -4,15 +4,23 @@ using UAssetAPI.UnrealTypes;
 
 namespace NeoRuneExtended.Compiler;
 
-internal sealed record LocalVar(string Name, UType Type, FPackageIndex Function, bool OutParam = false) : Var(Type)
+internal sealed record LocalVar(string Name, UType Type, FPackageIndex Function, bool OutParam = false, FPackageIndex? Member = null) : Var(Type)
 {
 	public override KismetExpression Expr(ScriptBuilder s)
 	{
-		return s.Local(Name, OutParam);
+		if (Member == null)
+		{
+			return s.Local(Name, OutParam);
+		}
+		return s.Member(Name, Member);
 	}
 
 	public override KismetPropertyPointer Pointer(ScriptBuilder s)
 	{
-		return s.Pointer(Name, Function);
+		if (Member == null)
+		{
+			return s.Pointer(Name, Function);
+		}
+		return s.Pointer(Name, s.Ref(Member));
 	}
 }

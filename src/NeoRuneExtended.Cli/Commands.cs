@@ -13,7 +13,7 @@ namespace NeoRuneExtended.Cli;
 
 internal static class Commands
 {
-	public const string Help = "NeoRuneExtended - C# mods for Minecraft Dungeons II\n\nUsage: neorunex <command> [options]   (arguments can also come from @file.rsp)\n\n  build      Compile a mod's C# sources to Blueprint packages and pack them.\n               --mod <Name> --out <dir> --source <file.cs>... --ref <file.dll>...\n               [--install] [--game <game folder>] [--tools <dir with retoc/repak>]\n               [--title <name>] [--version <x.y>] [--author <name>] [--author-url <url>]\n               [--description <text>]   (the Mods tab of Blueprint Loader 2.0)\n  install    Copy a built mod into the game's ~mods folder (skips unchanged files).\n               --mod <Name> --pak <dir with Name_P.*> [--game <game folder>]\n               [--bindings <NeoRune.Game.json>]  (warns NR0003 if the game is another build)\n  doctor     Check the setup: game folders, mod loader, installed mods, and the game build\n             against your NeoRuneExtended.Sdk versions. Run it in a mod folder to also check that mod.\n               [--game <game folder>] [--project <mod folder or .csproj>]\n  discover   Dump the running game's reflected API (read-only memory access).\n               [--out <api.json.gz>]\n  bindings   Generate the C# bindings project from an API dump.\n               --api <api.json[.gz]> --out <dir> --abstractions <NeoRuneExtended.Abstractions.csproj>\n  diff       Report API changes between two dumps (run after a game patch).\n               <old.json.gz> <new.json.gz>\n  log        Print what a mod wrote with NeoRune.Log.\n               <ModName> | <file.sav>   [--follow]  (keep printing new lines while you play)\n  disasm     Print the bytecode of a generated (or any versioned) Blueprint package.\n               <file.uasset>";
+public const string Help = "NeoRuneExtended - C# mods for Minecraft Dungeons II\n\nUsage: neorunex <command> [options]   (arguments can also come from @file.rsp)\n\n  build      Compile a mod's C# sources to Blueprint packages and pack them.\n               --mod <Name> --out <dir> --source <file.cs>... --ref <file.dll>...\n               [--install] [--game <game folder>] [--tools <dir with retoc/repak>]\n               [--title <name>] [--version <x.y>] [--author <name>] [--author-url <url>]\n               [--description <text>]   (the Mods tab of Blueprint Loader 2.0)\n               [--images <dir>]   (PNG/JPG files packed into the mod for NeoRune.Images)\n  install    Copy a built mod into the game's ~mods folder (skips unchanged files).\n               --mod <Name> --pak <dir with Name_P.*> [--game <game folder>]\n               [--bindings <NeoRune.Game.json>]  (warns NR0003 if the game is another build)\n  doctor     Check the setup: game folders, mod loader, installed mods, and the game build\n             against your NeoRuneExtended.Sdk versions. Run it in a mod folder to also check that mod.\n               [--game <game folder>] [--project <mod folder or .csproj>]\n  discover   Dump the running game's reflected API (read-only memory access).\n               [--out <api.json.gz>]\n  bindings   Generate the C# bindings project from an API dump.\n               --api <api.json[.gz]> --out <dir> --abstractions <NeoRuneExtended.Abstractions.csproj>\n  diff       Report API changes between two dumps (run after a game patch).\n               <old.json.gz> <new.json.gz>\n  log        Print what a mod wrote with NeoRune.Log.\n               <ModName> | <file.sav>   [--follow]  (keep printing new lines while you play)\n  test       Run the mod's [ModTests] classes as normal .NET code, without the game.\n               [--project <dir or .csproj>]\n  pack       Build the mod in Release and zip it for Nexus (<Title>-<version>.zip in Release\\).\n               [--project <dir or .csproj>] [--out <dir>]\n  perf       What a mod's functions cost, from a profiling build (dotnet build -p:NeoRuneProfile=true).\n               <ModName> [--all]\n  tune       Live tuning: change a running mod's NeoRune.Tuner values (Debug builds) without restarting.\n               <ModName> [key=value ...]   then type key=value, \"list\" or \"quit\"\n  update     After a game update: which installed NeoRuneExtended mods use something the update changed.\n               [--game <dir>] [--api <new dump>]  (reads the running game's API when it's a build NeoRuneExtended hasn't seen)\n  crash      Explain the newest crash report and name the mod that was running ([n] for an older one, --list).\n  disasm     Print the bytecode of a generated (or any versioned) Blueprint package.\n               <file.uasset>";
 
 	private static string ToolsDir(Args a)
 	{
@@ -33,7 +33,10 @@ internal static class Commands
 		{
 			throw new UsageException("no --source files");
 		}
-		ModCompiler modCompiler = new ModCompiler(text, readOnlyList, a.All("ref"), a.All("define"));
+		ModCompiler modCompiler = new ModCompiler(text, readOnlyList, a.All("ref"), a.All("define"), a.Get("translations"))
+		{
+			Requires = (a.Get("requires") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList()
+		};
 		// What Blueprint Loader 2.0 shows in the Mods tab. "\n" in the description is a line break.
 		string text2 = a.Get("title");
 		modCompiler.Info = new ModInfoData
@@ -54,7 +57,8 @@ internal static class Commands
 		{
 			return 1;
 		}
-		string text4 = new ModPackager(ToolsDir(a)).Pack(text, text3, Path.Combine(path, "Pak"), Path.Combine(path, "Temp"));
+		string text4 = new ModPackager(ToolsDir(a)).Pack(text, text3, Path.Combine(path, "Pak"), Path.Combine(path, "Temp"), a.Get("images"));
+		modCompiler.WriteManifest(text4 + ".neorune.json");
 		Console.WriteLine("NeoRuneExtended: " + text + " -> " + Path.GetDirectoryName(text4));
 		if (a.Flag("install"))
 		{
@@ -85,7 +89,12 @@ internal static class Commands
 			WarnIfOtherBuild(mod, text, text2);
 		}
 		string target = Path.Combine(GameInstall.ModsDirectory(text), mod);
-		if (new string[3] { ".pak", ".utoc", ".ucas" }.All(delegate(string ext)
+		List<string> list = new List<string> { ".pak", ".utoc", ".ucas" };
+		if (File.Exists(stem + ".neorune.json"))
+		{
+			list.Add(".neorune.json");
+		}
+		if (list.All(delegate(string ext)
 		{
 			string path2 = Path.Combine(target, mod + "_P" + ext);
 			return File.Exists(path2) && ((ReadOnlySpan<byte>)File.ReadAllBytes(path2).AsSpan()).SequenceEqual((ReadOnlySpan<byte>)File.ReadAllBytes(stem + ext));

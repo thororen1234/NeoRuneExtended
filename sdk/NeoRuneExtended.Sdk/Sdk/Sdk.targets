@@ -26,12 +26,25 @@
       <_NeoRuneLine Include="--mod=$(NeoRuneModName)" />
       <_NeoRuneLine Include="--out=$(NeoRuneOutDir)" />
       <_NeoRuneLine Include="--tools=$(NeoRuneSdkRoot)tools" />
+      <!-- Live tuning (NeoRune.Tuner listens for "neorunex tune"): Debug builds only, unless set otherwise. -->
+      <_NeoRuneLine Include="--define=NEORUNE_TUNING" Condition="'$(NeoRuneLiveTuning)' == 'true'" />
+      <!-- Profiling build for "neorunex perf": dotnet build -p:NeoRuneProfile=true (never for releases). -->
+      <_NeoRuneLine Include="--define=NEORUNE_PROFILE" Condition="'$(NeoRuneProfile)' == 'true'" />
       <!-- What Blueprint Loader 2.0 shows in the Mods tab (escaped: MSBuild items split at semicolons). -->
       <_NeoRuneLine Include="--title=$([MSBuild]::Escape('$(NeoRuneModTitle)'))" Condition="'$(NeoRuneModTitle)' != ''" />
       <_NeoRuneLine Include="--version=$([MSBuild]::Escape('$(NeoRuneModVersion)'))" Condition="'$(NeoRuneModVersion)' != ''" />
       <_NeoRuneLine Include="--author=$([MSBuild]::Escape('$(NeoRuneModAuthor)'))" Condition="'$(NeoRuneModAuthor)' != ''" />
       <_NeoRuneLine Include="--author-url=$([MSBuild]::Escape('$(NeoRuneModAuthorUrl)'))" Condition="'$(NeoRuneModAuthorUrl)' != ''" />
       <_NeoRuneLine Include="--description=$([MSBuild]::Escape('$(NeoRuneModDescription)'))" Condition="'$(NeoRuneModDescription)' != ''" />
+      <!-- Other mods this one needs: "BetterArmor>=2.0;ItemStats" (checked by neorunex update and doctor). -->
+      <_NeoRuneLine Include="--requires=$([MSBuild]::Escape('$(NeoRuneRequires)'))" Condition="'$(NeoRuneRequires)' != ''" />
+      <!-- Pictures for NeoRune.Images: the Images folder next to the project. -->
+      <_NeoRuneLine Include="--images=$(MSBuildProjectDirectory)\Images" Condition="Exists('$(MSBuildProjectDirectory)\Images')" />
+      <!-- Text in several languages for NeoRune.Translations: the Translations folder next to the project (<language>.txt). -->
+      <_NeoRuneLine Include="--translations=$(MSBuildProjectDirectory)\Translations" Condition="Exists('$(MSBuildProjectDirectory)\Translations')" />
+      <_NeoRuneImage Include="$(MSBuildProjectDirectory)\Translations\*.txt" />
+      <!-- Rebuild when a picture changes. -->
+      <_NeoRuneImage Include="$(MSBuildProjectDirectory)\Images\**\*.png;$(MSBuildProjectDirectory)\Images\**\*.jpg;$(MSBuildProjectDirectory)\Images\**\*.jpeg" />
       <_NeoRuneLine Include="@(Compile->'--source=%(FullPath)')" />
       <_NeoRuneLine Include="@(ReferencePath->'--ref=%(FullPath)')" />
     </ItemGroup>
@@ -40,7 +53,7 @@
   </Target>
 
   <Target Name="NeoRuneCompile" AfterTargets="_NeoRunePrepare" Condition="'$(_NeoRuneRsp)' != ''"
-          Inputs="@(Compile);@(ReferencePath);$(_NeoRuneRsp);$(MSBuildProjectFullPath);$(_NeoRuneTool)"
+          Inputs="@(Compile);@(ReferencePath);@(_NeoRuneImage);$(_NeoRuneRsp);$(MSBuildProjectFullPath);$(_NeoRuneTool)"
           Outputs="$(_NeoRunePak)">
     <!-- Errors are printed as "file(line,col): error NR...", which MSBuild and IDEs pick up. -->
     <Exec Command="dotnet &quot;$(_NeoRuneTool)&quot; @&quot;$(_NeoRuneRsp)&quot;" IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="high">

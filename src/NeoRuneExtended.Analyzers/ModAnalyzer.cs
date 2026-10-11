@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -20,11 +21,9 @@ public sealed class ModAnalyzer : DiagnosticAnalyzer
 
 	public static readonly DiagnosticDescriptor Async = Rule("NR1003", "async/await is not supported", "async/await is not supported: use NeoRune.Timer to run code later");
 
-	public static readonly DiagnosticDescriptor Linq = Rule("NR1004", "LINQ is not supported", "LINQ is not supported: use a foreach loop");
+	public static readonly DiagnosticDescriptor Linq = Rule("NR1004", "LINQ method or syntax is not supported", "{0}");
 
-	public static readonly DiagnosticDescriptor StaticState = Rule("NR1005", "Static fields are not supported", "Static field '{0}' is not supported (Blueprints have no static state): make it an instance field of the mod class, or const");
-
-	public static readonly DiagnosticDescriptor ScriptOnly = Rule("NR1006", "AngelScript function returns a value", "'{0}' is implemented in AngelScript and {1}: mods can call AngelScript functions only when they return nothing; read the value from a property instead");
+	public static readonly DiagnosticDescriptor ScriptOnly = Rule("NR1006", "AngelScript function with a result", "'{0}' is implemented in AngelScript and returns a value (or has out parameters): mods can only call AngelScript functions that return nothing");
 
 	public static readonly DiagnosticDescriptor Generics = Rule("NR1007", "Generic methods are not supported", "Generic method '{0}' is not supported in mod code");
 
@@ -36,11 +35,9 @@ public sealed class ModAnalyzer : DiagnosticAnalyzer
 
 	public static readonly DiagnosticDescriptor LostCopy = new DiagnosticDescriptor("NR1011", "Change to a copy is lost", "{0} is a copy (lists, dictionaries, sets and structs are values), so this change doesn't reach {1} and is never used", "NeoRune", DiagnosticSeverity.Warning, true, null, null);
 
-	public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => ImmutableArray.Create(new DiagnosticDescriptor[11]
-	{
-		Exceptions, Lambdas, Async, Linq, StaticState, ScriptOnly, Generics, Statement, TypeOf, NoUnrealType,
-		LostCopy
-	});
+	private static readonly ImmutableArray<string> SupportedLinq = ImmutableArray.Create<string>("Where", "Select", "Any", "All", "Count", "First", "FirstOrDefault", "Last", "LastOrDefault", "ElementAt", "ElementAtOrDefault", "Contains", "Sum", "Average", "Min", "Max", "OrderBy", "OrderByDescending", "Distinct", "Skip", "Take", "Reverse", "ToList", "ToArray", "AsEnumerable", "Range");
+
+	public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => ImmutableArray.Create(new DiagnosticDescriptor[10] { Exceptions, Lambdas, Async, Linq, ScriptOnly, Generics, Statement, TypeOf, NoUnrealType, LostCopy });
 
 	private static DiagnosticDescriptor Rule(string id, string title, string message)
 	{
@@ -51,47 +48,90 @@ public sealed class ModAnalyzer : DiagnosticAnalyzer
 	{
 		context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
 		context.EnableConcurrentExecution();
-		context.RegisterSyntaxNodeAction<SyntaxKind>(delegate(SyntaxNodeAnalysisContext c)
+		Syntax(context, delegate(SyntaxNodeAnalysisContext c)
 		{
-			// Hand-written [UFunction] bindings are declarations only (=> throw null!): nothing of theirs is compiled.
-			if (c.ContainingSymbol == null || !c.ContainingSymbol.GetAttributes().Any((AttributeData a) => a.AttributeClass?.Name == "UFunctionAttribute"))
+			if (c.ContainingSymbol == null || !NotCompiled(c.ContainingSymbol))
 			{
 				c.ReportDiagnostic(Diagnostic.Create(Exceptions, c.Node.GetFirstToken().GetLocation(), c.Node.GetFirstToken().Text));
 			}
 		}, SyntaxKind.TryStatement, SyntaxKind.ThrowStatement, SyntaxKind.ThrowExpression);
-		context.RegisterOperationAction(delegate(OperationAnalysisContext c)
+		Operation(context, delegate(OperationAnalysisContext c)
 		{
 			AnalyzeCaptures(c, ((IAnonymousFunctionOperation)c.Operation).Symbol);
 		}, OperationKind.AnonymousFunction);
-		context.RegisterOperationAction(delegate(OperationAnalysisContext c)
+		Operation(context, delegate(OperationAnalysisContext c)
 		{
 			AnalyzeCaptures(c, ((ILocalFunctionOperation)c.Operation).Symbol);
 		}, OperationKind.LocalFunction);
-		context.RegisterSyntaxNodeAction<SyntaxKind>(delegate(SyntaxNodeAnalysisContext c)
+		Syntax(context, delegate(SyntaxNodeAnalysisContext c)
 		{
 			c.ReportDiagnostic(Diagnostic.Create(Async, c.Node.GetLocation()));
 		}, SyntaxKind.AwaitExpression);
-		context.RegisterSyntaxNodeAction<SyntaxKind>(delegate(SyntaxNodeAnalysisContext c)
+		Syntax(context, delegate(SyntaxNodeAnalysisContext c)
 		{
-			c.ReportDiagnostic(Diagnostic.Create(Linq, c.Node.GetLocation()));
+			c.ReportDiagnostic(Diagnostic.Create(Linq, c.Node.GetLocation(), "Query syntax (from ... select) is not supported: use the methods, e.g. list.Where(x => ...).Select(x => ...)"));
 		}, SyntaxKind.QueryExpression);
-		context.RegisterSyntaxNodeAction<SyntaxKind>(delegate(SyntaxNodeAnalysisContext c)
+		Syntax(context, delegate(SyntaxNodeAnalysisContext c)
 		{
-			// An attribute argument is read by the compiler, not run: [ModSetting.Widget("id", typeof(MyWidget))] is fine.
-			if (c.Node.FirstAncestorOrSelf<AttributeSyntax>() == null)
+			if (c.Node.FirstAncestorOrSelf<AttributeArgumentSyntax>() == null)
 			{
 				c.ReportDiagnostic(Diagnostic.Create(TypeOf, c.Node.GetLocation()));
 			}
 		}, SyntaxKind.TypeOfExpression);
-		context.RegisterSyntaxNodeAction<SyntaxKind>(delegate(SyntaxNodeAnalysisContext c)
+		Syntax(context, delegate(SyntaxNodeAnalysisContext c)
 		{
 			c.ReportDiagnostic(Diagnostic.Create(Statement, c.Node.GetFirstToken().GetLocation(), c.Node.GetFirstToken().Text));
-		}, SyntaxKind.GotoStatement, SyntaxKind.LockStatement, SyntaxKind.UsingStatement, SyntaxKind.UnsafeStatement, SyntaxKind.FixedStatement, SyntaxKind.YieldReturnStatement);
-		context.RegisterSymbolAction(AnalyzeField, SymbolKind.Field);
-		context.RegisterSymbolAction(AnalyzeMethod, SymbolKind.Method);
-		context.RegisterOperationAction(AnalyzeInvocation, OperationKind.Invocation);
-		context.RegisterOperationAction(AnalyzeLocal, OperationKind.VariableDeclarator);
-		context.RegisterOperationAction(AnalyzeCopies, OperationKind.MethodBody, OperationKind.LocalFunction);
+		}, SyntaxKind.GotoStatement, SyntaxKind.LockStatement, SyntaxKind.UsingStatement, SyntaxKind.UnsafeStatement, SyntaxKind.FixedStatement);
+		Symbol(context, AnalyzeField, SymbolKind.Field);
+		Symbol(context, AnalyzeMethod, SymbolKind.Method);
+		Operation(context, AnalyzeInvocation, OperationKind.Invocation);
+		Operation(context, AnalyzeLocal, OperationKind.VariableDeclarator);
+		Operation(context, AnalyzeCopies, OperationKind.MethodBody, OperationKind.LocalFunction);
+	}
+
+	private static bool InTests(ISymbol? s)
+	{
+		for (INamedTypeSymbol namedTypeSymbol = (s as INamedTypeSymbol) ?? s?.ContainingType; namedTypeSymbol != null; namedTypeSymbol = namedTypeSymbol.ContainingType)
+		{
+			if (namedTypeSymbol.GetAttributes().Any<AttributeData>((AttributeData a) => a.AttributeClass?.Name == "ModTestsAttribute"))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static void Syntax(AnalysisContext context, Action<SyntaxNodeAnalysisContext> action, params SyntaxKind[] kinds)
+	{
+		context.RegisterSyntaxNodeAction(delegate(SyntaxNodeAnalysisContext c)
+		{
+			if (!InTests(c.ContainingSymbol))
+			{
+				action(c);
+			}
+		}, kinds);
+	}
+
+	private static void Operation(AnalysisContext context, Action<OperationAnalysisContext> action, params OperationKind[] kinds)
+	{
+		context.RegisterOperationAction(delegate(OperationAnalysisContext c)
+		{
+			if (!InTests(c.ContainingSymbol))
+			{
+				action(c);
+			}
+		}, kinds);
+	}
+
+	private static void Symbol(AnalysisContext context, Action<SymbolAnalysisContext> action, params SymbolKind[] kinds)
+	{
+		context.RegisterSymbolAction(delegate(SymbolAnalysisContext c)
+		{
+			if (!InTests(c.Symbol))
+			{
+				action(c);
+			}
+		}, kinds);
 	}
 
 	private static bool InModCode(ISymbol s)
@@ -102,23 +142,25 @@ public sealed class ModAnalyzer : DiagnosticAnalyzer
 	private static void AnalyzeField(SymbolAnalysisContext c)
 	{
 		IFieldSymbol fieldSymbol = (IFieldSymbol)c.Symbol;
-		if (!fieldSymbol.IsImplicitlyDeclared && fieldSymbol.ContainingType.TypeKind != TypeKind.Enum)
+		if (!fieldSymbol.IsImplicitlyDeclared && fieldSymbol.ContainingType.TypeKind != TypeKind.Enum && !fieldSymbol.IsConst && !IsUnrealType(fieldSymbol.Type))
 		{
-			if (fieldSymbol.IsStatic && !fieldSymbol.IsConst)
-			{
-				c.ReportDiagnostic(Diagnostic.Create(StaticState, fieldSymbol.Locations[0], fieldSymbol.Name));
-			}
-			else if (!fieldSymbol.IsConst && !IsUnrealType(fieldSymbol.Type))
-			{
-				c.ReportDiagnostic(Diagnostic.Create(NoUnrealType, fieldSymbol.Locations[0], fieldSymbol.Type.ToDisplayString()));
-			}
+			c.ReportDiagnostic(Diagnostic.Create(NoUnrealType, fieldSymbol.Locations[0], fieldSymbol.Type.ToDisplayString()));
 		}
+	}
+
+	private static bool NotCompiled(ISymbol s)
+	{
+		return s.GetAttributes().Any<AttributeData>(delegate(AttributeData a)
+		{
+			string text = a.AttributeClass?.Name;
+			return (text == "UFunctionAttribute" || text == "IntrinsicAttribute") ? true : false;
+		});
 	}
 
 	private static void AnalyzeMethod(SymbolAnalysisContext c)
 	{
 		IMethodSymbol methodSymbol = (IMethodSymbol)c.Symbol;
-		if (methodSymbol.MethodKind != MethodKind.Ordinary || methodSymbol.IsImplicitlyDeclared)
+		if (methodSymbol.MethodKind != MethodKind.Ordinary || methodSymbol.IsImplicitlyDeclared || NotCompiled(methodSymbol))
 		{
 			return;
 		}
@@ -137,7 +179,7 @@ public sealed class ModAnalyzer : DiagnosticAnalyzer
 				c.ReportDiagnostic(Diagnostic.Create(NoUnrealType, parameter.Locations[0], parameter.Type.ToDisplayString()));
 			}
 		}
-		if (!methodSymbol.ReturnsVoid && !IsUnrealType(methodSymbol.ReturnType))
+		if (!methodSymbol.ReturnsVoid && !IsUnrealType(methodSymbol.ReturnType) && methodSymbol.ReturnType.ToDisplayString() != "System.Collections.IEnumerator")
 		{
 			c.ReportDiagnostic(Diagnostic.Create(NoUnrealType, methodSymbol.Locations[0], methodSymbol.ReturnType.ToDisplayString()));
 		}
@@ -146,23 +188,42 @@ public sealed class ModAnalyzer : DiagnosticAnalyzer
 	private static void AnalyzeInvocation(OperationAnalysisContext c)
 	{
 		IMethodSymbol targetMethod = ((IInvocationOperation)c.Operation).TargetMethod;
-		// AngelScript functions are called through ProcessEvent, which gives nothing back: no return value, no out parameters.
-		if (targetMethod.OriginalDefinition.GetAttributes().Any<AttributeData>((AttributeData a) => a.AttributeClass?.Name == "ScriptOnlyAttribute"))
+		if (targetMethod.OriginalDefinition.GetAttributes().Any<AttributeData>((AttributeData a) => a.AttributeClass?.Name == "ScriptOnlyAttribute") && (!targetMethod.ReturnsVoid || targetMethod.Parameters.Any<IParameterSymbol>(delegate(IParameterSymbol p)
 		{
-			string problem = !targetMethod.ReturnsVoid ? "returns a value" : (targetMethod.Parameters.Any((IParameterSymbol p) => p.RefKind == RefKind.Out || p.RefKind == RefKind.Ref) ? "has out parameters" : null);
-			if (problem != null)
+			RefKind refKind = p.RefKind;
+			return refKind - 1 <= RefKind.Ref;
+		})))
+		{
+			c.ReportDiagnostic(Diagnostic.Create(ScriptOnly, c.Operation.Syntax.GetLocation(), targetMethod.Name));
+		}
+		if (targetMethod.ContainingType?.ToDisplayString() == "System.Linq.Enumerable" && !SupportedLinq.Contains(targetMethod.Name))
+		{
+			c.ReportDiagnostic(Diagnostic.Create(Linq, c.Operation.Syntax.GetLocation(), "LINQ " + targetMethod.Name + " is not supported: use a foreach loop (supported: " + string.Join(", ", SupportedLinq) + ")"));
+		}
+	}
+
+	private static bool IsLinqLambda(IOperation op)
+	{
+		for (IOperation parent = op.Parent; parent != null; parent = parent.Parent)
+		{
+			if (!(parent is IDelegateCreationOperation) && !(parent is IConversionOperation) && !(parent is IArgumentOperation))
 			{
-				c.ReportDiagnostic(Diagnostic.Create(ScriptOnly, c.Operation.Syntax.GetLocation(), targetMethod.Name, problem));
+				if (parent is IInvocationOperation invocationOperation)
+				{
+					return invocationOperation.TargetMethod.ContainingType?.ToDisplayString() == "System.Linq.Enumerable";
+				}
+				return false;
 			}
 		}
-		if (targetMethod.ContainingType?.ToDisplayString() == "System.Linq.Enumerable")
-		{
-			c.ReportDiagnostic(Diagnostic.Create(Linq, c.Operation.Syntax.GetLocation()));
-		}
+		return false;
 	}
 
 	private static void AnalyzeCaptures(OperationAnalysisContext c, IMethodSymbol fn)
 	{
+		if (IsLinqLambda(c.Operation))
+		{
+			return;
+		}
 		foreach (IOperation item in c.Operation.Descendants())
 		{
 			ISymbol symbol = ((item is ILocalReferenceOperation localReferenceOperation) ? ((ISymbol)localReferenceOperation.Local) : ((ISymbol)((!(item is IParameterReferenceOperation parameterReferenceOperation)) ? null : parameterReferenceOperation.Parameter)));
@@ -412,9 +473,38 @@ public sealed class ModAnalyzer : DiagnosticAnalyzer
 			return true;
 		default:
 		{
+			if (t is IArrayTypeSymbol arrayTypeSymbol)
+			{
+				if (arrayTypeSymbol.Rank == 1)
+				{
+					return IsUnrealType(arrayTypeSymbol.ElementType);
+				}
+				return false;
+			}
 			if (!(t is INamedTypeSymbol namedTypeSymbol))
 			{
 				return false;
+			}
+			bool flag = namedTypeSymbol.ContainingNamespace?.ToDisplayString() == "System.Collections.Generic";
+			if (flag)
+			{
+				bool flag2;
+				switch (namedTypeSymbol.MetadataName)
+				{
+				case "IEnumerable`1":
+				case "IReadOnlyList`1":
+				case "IReadOnlyCollection`1":
+					flag2 = true;
+					break;
+				default:
+					flag2 = false;
+					break;
+				}
+				flag = flag2;
+			}
+			if (flag || (namedTypeSymbol.ContainingNamespace?.ToDisplayString() == "System.Linq" && namedTypeSymbol.MetadataName == "IOrderedEnumerable`1"))
+			{
+				return IsUnrealType(namedTypeSymbol.TypeArguments[0]);
 			}
 			if (namedTypeSymbol.TypeKind == TypeKind.Enum && namedTypeSymbol.EnumUnderlyingType != null)
 			{
@@ -425,7 +515,7 @@ public sealed class ModAnalyzer : DiagnosticAnalyzer
 				return true;
 			}
 			string text = namedTypeSymbol.ContainingNamespace?.ToDisplayString();
-			bool flag = text == "NeoRune";
+			flag = text == "NeoRune";
 			if (flag)
 			{
 				bool flag2;

@@ -33,6 +33,8 @@
     <NeoRuneGameDir Condition="'$(NeoRuneGameDir)' == ''"></NeoRuneGameDir>
     <!-- Warn (NR0003) when the installed game is a different build from the one this SDK's bindings were made for. -->
     <NeoRuneCheckGameBuild Condition="'$(NeoRuneCheckGameBuild)' == ''">true</NeoRuneCheckGameBuild>
+    <!-- Live tuning with "neorunex tune": on in Debug builds (the default of dotnet build), off in Release. -->
+    <NeoRuneLiveTuning Condition="'$(NeoRuneLiveTuning)' == '' and '$(Configuration)' != 'Release'">true</NeoRuneLiveTuning>
     <NeoRuneOutDir Condition="'$(NeoRuneOutDir)' == ''">$(MSBuildProjectDirectory)\bin\NeoRune\</NeoRuneOutDir>
   </PropertyGroup>
 </Project>

@@ -21,7 +21,7 @@ internal static class LogCommand
 		string text2 = (text.EndsWith(".sav") ? text : Find(text));
 		if (text2 == null)
 		{
-			throw new FileNotFoundException($"No log for {text} yet: neither {Path.Combine(SaveGames, "NeoRune_" + text + ".sav")} nor an Xbox app save exists. " + "The mod has not logged anything, or it has not run (try \"neorune doctor\").");
+			throw new FileNotFoundException($"No log for {text} yet: neither {Path.Combine(SaveGames, "NeoRune_" + text + ".sav")} nor an Xbox app save exists. " + "The mod has not logged anything, or it has not run (try \"neorunex doctor\").");
 		}
 		if (!text2.EndsWith(".sav"))
 		{
@@ -86,8 +86,13 @@ internal static class LogCommand
 
 	public static string? Find(string mod)
 	{
-		string text = Path.Combine(SaveGames, "NeoRune_" + mod + ".sav");
-		string text2 = FindXboxLog(mod);
+		return FindSave(mod, "NeoRune_" + mod + ".sav", "NeoRuneLogData");
+	}
+
+	public static string? FindSave(string mod, string fileName, string saveClass)
+	{
+		string text = Path.Combine(SaveGames, fileName);
+		string text2 = FindXboxSave(mod, saveClass);
 		if (!File.Exists(text))
 		{
 			return text2;
@@ -115,9 +120,9 @@ internal static class LogCommand
 			select Path.Combine(p, "SystemAppData", "wgs")).Where(Directory.Exists);
 	}
 
-	private static string? FindXboxLog(string mod)
+	private static string? FindXboxSave(string mod, string saveClass)
 	{
-		byte[] bytes = Encoding.ASCII.GetBytes("/Game/Mods/" + mod + "/NeoRuneLogData");
+		byte[] bytes = Encoding.ASCII.GetBytes("/Game/Mods/" + mod + "/" + saveClass);
 		string result = null;
 		DateTime dateTime = DateTime.MinValue;
 		foreach (string item in XboxSaveFolders())

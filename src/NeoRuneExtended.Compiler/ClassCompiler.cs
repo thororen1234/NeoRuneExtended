@@ -31,7 +31,9 @@ internal sealed class ClassCompiler
 
 	private MethodPlan? beginPlay;
 
-	private IMethodSymbol? startup;
+	private List<IOperation> staticInitializers = new List<IOperation>();
+
+	private readonly List<IMethodSymbol> startup = new List<IMethodSymbol>();
 
 	public ModCompiler Mod { get; }
 
@@ -127,6 +129,19 @@ internal sealed class ClassCompiler
 		return e.AddMethod?.IsImplicitlyDeclared ?? false;
 	}
 
+	private static string FunctionName(IMethodSymbol m)
+	{
+		string text = VariableName(m);
+		int num = (from x in m.ContainingType.GetMembers(m.Name).OfType<IMethodSymbol>()
+			where x.MethodKind == MethodKind.Ordinary
+			select x).ToList().FindIndex((IMethodSymbol x) => SymbolEqualityComparer.Default.Equals(x, m.OriginalDefinition));
+		if (num <= 0)
+		{
+			return text;
+		}
+		return $"{text}_{num + 1}";
+	}
+
 	private static string VariableName(ISymbol s)
 	{
 		return (s.GetAttributes().FirstOrDefault((AttributeData a) => a.AttributeClass?.Name == "UNameAttribute")?.ConstructorArguments[0].Value as string) ?? s.Name;
@@ -146,6 +161,14 @@ internal sealed class ClassCompiler
 					fields[member] = new SelfMember(name, type, Blueprint.ClassIndex);
 				}
 			}
+		}
+		if (Type.Name == "ModActor" && Mod.Statics.Count > 0)
+		{
+			foreach (var (name2, type2) in Mod.Statics.Values)
+			{
+				Blueprint.AddVariable(name2, type2);
+			}
+			Blueprint.AddVariable("__StaticsReady", UType.Bool);
 		}
 		List<IMethodSymbol> list = (from methodSymbol in chain.SelectMany((INamedTypeSymbol t) => t.GetMembers().OfType<IMethodSymbol>()).Where(delegate(IMethodSymbol methodSymbol)
 			{
@@ -179,6 +202,12 @@ internal sealed class ClassCompiler
 		initializers = (from i in chain.SelectMany(FieldInitializers)
 			where !IsDefaultInitializer(i)
 			select i).ToList();
+		if (Type.Name == "ModActor" && IsActor)
+		{
+			staticInitializers = (from i in Mod.StaticInitializers()
+				where !IsDefaultInitializer(i)
+				select i).ToList();
+		}
 		beginPlay = plans.Values.FirstOrDefault((MethodPlan methodPlan) => methodPlan.Name == "ReceiveBeginPlay");
 		if (initializers.Count > 0 && !IsActor)
 		{
@@ -186,9 +215,13 @@ internal sealed class ClassCompiler
 		}
 		if (Type.Name == "ModActor" && IsActor)
 		{
-			startup = Mod.Compilation.GetTypeByMetadataName("NeoRune.NeoRuneWatermark")?.GetMembers("Show").OfType<IMethodSymbol>().FirstOrDefault();
+			startup.Add(Mod.Compilation.GetTypeByMetadataName("NeoRune.NeoRuneMark")?.GetMembers("Show").OfType<IMethodSymbol>().FirstOrDefault() ?? throw new CompileError("the compiler's built-in NeoRuneMark is missing: reinstall NeoRune.Sdk", Type.Locations.FirstOrDefault()));
+			if (Mod.Profile)
+			{
+				startup.Add(Mod.Compilation.GetTypeByMetadataName("NeoRune.Profiler")?.GetMembers("Start").OfType<IMethodSymbol>().FirstOrDefault() ?? throw new CompileError("NeoRune.Profiler is missing from the SDK", Type.Locations.FirstOrDefault()));
+			}
 		}
-		if ((initializers.Count > 0 || startup != null) && beginPlay == null)
+		if ((initializers.Count > 0 || startup.Count > 0 || staticInitializers.Count > 0) && beginPlay == null)
 		{
 			FunctionBuilder fn = Blueprint.AddFunction("ReceiveBeginPlay", EFunctionFlags.FUNC_Event | EFunctionFlags.FUNC_Protected | EFunctionFlags.FUNC_BlueprintEvent, "/Script/Engine.Actor:ReceiveBeginPlay");
 			functionNames.Add("ReceiveBeginPlay");
@@ -200,7 +233,7 @@ internal sealed class ClassCompiler
 					Method = null,
 					Name = "ReceiveBeginPlay",
 					Builder = fn
-				}).CompileBody(null, inits, startup);
+				}).CompileBody(null, inits, startup, staticInitializers);
 			});
 		}
 	}
@@ -258,7 +291,7 @@ internal sealed class ClassCompiler
 			bool isBeginPlay = plan == beginPlay;
 			Mod.Run(Type, delegate
 			{
-				new FunctionCompiler(this, plan).CompileBody(Body(plan.Method), isBeginPlay ? initializers : null, isBeginPlay ? startup : null);
+				new FunctionCompiler(this, plan).CompileBody(Body(plan.Method), isBeginPlay ? initializers : null, isBeginPlay ? startup : null, isBeginPlay ? staticInitializers : null);
 			});
 		}
 		return true;
@@ -366,9 +399,17 @@ internal sealed class ClassCompiler
 					IOperation body = localFunctionOperation.Body;
 					return body ?? localFunctionOperation.IgnoredBody;
 				}
-				IMethodBodyOperation methodBodyOperation = (operation as IMethodBodyOperation) ?? throw new CompileError("cannot compile " + m.Name, m.Locations.FirstOrDefault());
-				operation2 = methodBodyOperation.BlockBody;
-				return operation2 ?? methodBodyOperation.ExpressionBody ?? throw new CompileError(m.Name + " has no body (auto-accessors mixed with bodies, like 'get; set { }', are not supported)", m.Locations.FirstOrDefault());
+				IMethodBodyBaseOperation methodBodyBaseOperation = (operation as IMethodBodyBaseOperation) ?? throw new CompileError("cannot compile " + m.Name, m.Locations.FirstOrDefault());
+				if (operation is IConstructorBodyOperation constructorBodyOperation)
+				{
+					IOperation initializer = constructorBodyOperation.Initializer;
+					if (initializer != null)
+					{
+						throw new CompileError(m.ContainingType.Name + ": constructor initializers (: this(...)) are not supported", initializer.Syntax.GetLocation());
+					}
+				}
+				operation2 = methodBodyBaseOperation.BlockBody;
+				return operation2 ?? methodBodyBaseOperation.ExpressionBody ?? throw new CompileError(m.Name + " has no body (auto-accessors mixed with bodies, like 'get; set { }', are not supported)", m.Locations.FirstOrDefault());
 			}
 			return anonymousFunctionOperation.Body;
 		}
@@ -384,6 +425,7 @@ internal sealed class ClassCompiler
 		{
 			m = MostDerived(m);
 		}
+		bool flag = m.IsStatic || IsStructMethod(m) || chain.Any((INamedTypeSymbol t) => SymbolEqualityComparer.Default.Equals(t, m.ContainingType));
 		if (plans.TryGetValue(m, out MethodPlan value))
 		{
 			if (value.Library)
@@ -392,26 +434,19 @@ internal sealed class ClassCompiler
 			}
 			return value;
 		}
-		bool flag = m.IsStatic || chain.Any((INamedTypeSymbol t) => SymbolEqualityComparer.Default.Equals(t, m.ContainingType));
 		if (!flag && NeoRuneExtended.Compiler.Symbols.IsSource(m.ContainingType) && m.ContainingType.IsAbstract)
 		{
 			MethodPlan methodPlan = new MethodPlan
 			{
 				Method = m,
-				Name = VariableName(m),
+				Name = FunctionName(m),
 				External = true,
 				ByName = true
 			};
 			foreach (IParameterSymbol parameter in m.Parameters)
 			{
-				UType? obj = Symbols.Map(parameter.Type) ?? throw new CompileError($"parameter type '{parameter.Type}' has no Unreal equivalent", parameter.Locations.FirstOrDefault());
-				List<(ISymbol, string, UType, bool)> list = methodPlan.Params;
-				ISymbol item = parameter;
-				string name = parameter.Name;
-				UType item2 = obj;
-				RefKind refKind = parameter.RefKind;
-				bool item3 = refKind - 1 <= RefKind.Ref;
-				list.Add((item, name, item2, item3));
+				UType uType = Symbols.Map(parameter.Type) ?? throw new CompileError($"parameter type '{parameter.Type}' has no Unreal equivalent", parameter.Locations.FirstOrDefault());
+				methodPlan.Params.Add((parameter, parameter.Name, uType, ByReference(parameter, uType)));
 			}
 			if (!m.ReturnsVoid)
 			{
@@ -517,6 +552,37 @@ internal sealed class ClassCompiler
 		pending.Enqueue(methodPlan);
 	}
 
+	public static bool IsCoroutine(IMethodSymbol m)
+	{
+		if (m.MethodKind == MethodKind.Ordinary && m.ReturnType.ToDisplayString() == "System.Collections.IEnumerator")
+		{
+			return NeoRuneExtended.Compiler.Symbols.IsSource(m.ContainingType);
+		}
+		return false;
+	}
+
+	public static bool IsStructMethod(IMethodSymbol m)
+	{
+		if (!m.IsStatic)
+		{
+			return NeoRuneExtended.Compiler.Symbols.IsModStruct(m.ContainingType);
+		}
+		return false;
+	}
+
+	private static bool ByReference(IParameterSymbol param, UType type)
+	{
+		RefKind refKind = param.RefKind;
+		bool flag = refKind - 1 <= RefKind.Ref;
+		bool flag2 = flag;
+		if (!flag2)
+		{
+			bool flag3 = ((type is UType.Array || type is UType.Map || type is UType.Set) ? true : false);
+			flag2 = flag3;
+		}
+		return flag2;
+	}
+
 	private MethodPlan Plan(IMethodSymbol m)
 	{
 		if (plans.TryGetValue(m, out MethodPlan value))
@@ -549,7 +615,7 @@ internal sealed class ClassCompiler
 			}
 			else
 			{
-				string text2 = ((m.MethodKind == MethodKind.AnonymousFunction) ? ("Lambda_" + m.ContainingSymbol.Name) : (m.IsStatic ? (m.ContainingType.Name + "_" + m.Name) : VariableName(m)));
+				string text2 = ((m.MethodKind == MethodKind.AnonymousFunction) ? ("Lambda_" + m.ContainingSymbol.Name) : (m.IsStatic ? (m.ContainingType.Name + "_" + m.Name) : (IsStructMethod(m) ? (m.ContainingType.Name + "_" + ((m.MethodKind == MethodKind.Constructor) ? "New" : FunctionName(m))) : FunctionName(m))));
 				text = text2;
 				int num = 2;
 				while (functionNames.Contains(text))
@@ -584,23 +650,47 @@ internal sealed class ClassCompiler
 				methodPlan.ReturnType = uParam2.Type;
 			}
 		}
-		else
+		else if (IsCoroutine(m))
 		{
+			if (m.IsStatic || IsStructMethod(m))
+			{
+				throw new CompileError("coroutine " + m.Name + " must be a method of a class (not static, not in a struct)", m.Locations.FirstOrDefault());
+			}
+			methodPlan.Coroutine = true;
+			Blueprint.AddVariable(methodPlan.StateName, UType.Int);
 			foreach (IParameterSymbol parameter in m.Parameters)
 			{
 				UType uType = Symbols.Map(parameter.Type) ?? throw new CompileError($"parameter type '{parameter.Type}' has no Unreal equivalent", parameter.Locations.FirstOrDefault());
-				RefKind refKind = parameter.RefKind;
-				bool flag = refKind - 1 <= RefKind.Ref;
-				bool flag2 = flag;
-				functionBuilder.AddParameter(parameter.Name, uType, flag2);
-				methodPlan.Params.Add((parameter, parameter.Name, uType, flag2));
+				if (parameter.RefKind != RefKind.None)
+				{
+					throw new CompileError("coroutine parameters can't be ref or out", parameter.Locations.FirstOrDefault());
+				}
+				string text3 = text + "__" + parameter.Name;
+				Blueprint.AddVariable(text3, uType);
+				methodPlan.CoroutineParams.Add((parameter, text3, uType));
+			}
+		}
+		else
+		{
+			if (IsStructMethod(m))
+			{
+				UType uType2 = Symbols.Map(m.ContainingType);
+				functionBuilder.AddParameter("__self", uType2, isOut: true);
+				methodPlan.Params.Add((m.ContainingType, "__self", uType2, true));
+			}
+			foreach (IParameterSymbol parameter2 in m.Parameters)
+			{
+				UType uType3 = Symbols.Map(parameter2.Type) ?? throw new CompileError($"parameter type '{parameter2.Type}' has no Unreal equivalent", parameter2.Locations.FirstOrDefault());
+				bool flag = ByReference(parameter2, uType3);
+				functionBuilder.AddParameter(parameter2.Name, uType3, flag);
+				methodPlan.Params.Add((parameter2, parameter2.Name, uType3, flag));
 			}
 			if (!m.ReturnsVoid)
 			{
-				UType uType2 = Symbols.Map(m.ReturnType) ?? throw new CompileError($"return type '{m.ReturnType}' has no Unreal equivalent", m.Locations.FirstOrDefault());
-				functionBuilder.AddParameter("ReturnValue", uType2, isOut: false, isReturn: true);
+				UType uType4 = Symbols.Map(m.ReturnType) ?? throw new CompileError($"return type '{m.ReturnType}' has no Unreal equivalent", m.Locations.FirstOrDefault());
+				functionBuilder.AddParameter("ReturnValue", uType4, isOut: false, isReturn: true);
 				methodPlan.ReturnName = "ReturnValue";
-				methodPlan.ReturnType = uType2;
+				methodPlan.ReturnType = uType4;
 			}
 		}
 		plans[m] = methodPlan;

@@ -3,6 +3,10 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -17,6 +21,14 @@ public sealed class ModCompiler
 
 	private Dictionary<string, INamedTypeSymbol>? classesByPath;
 
+	private readonly List<string> references;
+
+	private readonly Dictionary<string, int> profileIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+
+	private const string MarkPath = "NeoRune (built in)/NeoRuneMark.cs";
+
+	public const string StaticsReady = "__StaticsReady";
+
 	private HashSet<INamedTypeSymbol> sdkClasses = new HashSet<INamedTypeSymbol>(SymbolEqualityComparer.Default);
 
 	private readonly List<INamedTypeSymbol> requested = new List<INamedTypeSymbol>();
@@ -25,7 +37,7 @@ public sealed class ModCompiler
 
 	public string ModName { get; }
 
-	public CSharpCompilation Compilation { get; }
+	public CSharpCompilation Compilation { get; private set; }
 
 	public Symbols Symbols { get; }
 
@@ -35,13 +47,361 @@ public sealed class ModCompiler
 
 	public ModInfoData? Info { get; set; }
 
-	public ModCompiler(string modName, IEnumerable<string> sourceFiles, IEnumerable<string> references, IEnumerable<string>? preprocessorSymbols = null)
+	public List<string> Requires { get; init; } = new List<string>();
+
+	public bool Profile { get; }
+
+	public List<string> ProfiledNames { get; } = new List<string>();
+
+	public Dictionary<ISymbol, (string Name, UType Type)> Statics { get; } = new Dictionary<ISymbol, (string, UType)>(SymbolEqualityComparer.Default);
+
+	public string ModActorClassPath => Symbols.ModRoot + "/ModActor.ModActor_C";
+
+	public ModCompiler(string modName, IEnumerable<string> sourceFiles, IEnumerable<string> references, IEnumerable<string>? preprocessorSymbols = null, string? translationsDirectory = null)
 	{
 		ModName = modName;
-		CSharpParseOptions options = new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.Parse, SourceCodeKind.Regular, preprocessorSymbols);
-		IEnumerable<SyntaxTree> syntaxTrees = sourceFiles.Select((string f) => CSharpSyntaxTree.ParseText(File.ReadAllText(f), options, f));
-		Compilation = CSharpCompilation.Create(modName, syntaxTrees, references.Select((string r) => MetadataReference.CreateFromFile(r)), new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, reportSuppressedDiagnostics: false, null, null, null, null, OptimizationLevel.Debug, checkOverflow: false, allowUnsafe: false, null, null, default(ImmutableArray<byte>), null, Platform.AnyCpu, ReportDiagnostic.Default, 4, null, concurrentBuild: true, deterministic: false, null, null, null, null, null, publicSign: false, MetadataImportOptions.Public, NullableContextOptions.Enable));
+		this.references = references.ToList();
+		Dictionary<string, List<(string, string)>> dictionary = ReadTranslations(translationsDirectory);
+		List<string> list = (preprocessorSymbols ?? Array.Empty<string>()).ToList();
+		if (dictionary.Count > 0)
+		{
+			list.Add("NEORUNE_TRANSLATIONS");
+		}
+		CSharpParseOptions options = new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.Parse, SourceCodeKind.Regular, list);
+		IEnumerable<SyntaxTree> syntaxTrees = sourceFiles.Select((string f) => CSharpSyntaxTree.ParseText(File.ReadAllText(f), options, f)).Append(CSharpSyntaxTree.ParseText(EmbeddedSource("NeoRuneMark.cs"), options, "NeoRune (built in)/NeoRuneMark.cs"));
+		Compilation = CSharpCompilation.Create(modName, syntaxTrees, this.references.Select((string r) => MetadataReference.CreateFromFile(r)), new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, reportSuppressedDiagnostics: false, null, null, null, null, OptimizationLevel.Debug, checkOverflow: false, allowUnsafe: false, null, null, default(ImmutableArray<byte>), null, Platform.AnyCpu, ReportDiagnostic.Default, 4, null, concurrentBuild: true, deterministic: false, null, null, null, null, null, publicSign: false, MetadataImportOptions.Public, NullableContextOptions.Enable));
+		Profile = preprocessorSymbols?.Contains("NEORUNE_PROFILE") ?? false;
+		if (Profile)
+		{
+			Compilation = Compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText(ProfileCounters(), options, "NeoRune (built in)/ProfileCounters.cs"));
+		}
+		string text = SaveClasses();
+		if (text != null)
+		{
+			Compilation = Compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText(text, options, "NeoRune (built in)/ModSaves.cs"));
+		}
+		if (dictionary.Count > 0)
+		{
+			Compilation = Compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText(TranslationTable(dictionary), options, "NeoRune (built in)/Translations.cs"));
+		}
 		Symbols = new Symbols(Compilation, "/Game/Mods/" + modName);
+	}
+
+	public static Dictionary<string, List<(string Key, string Value)>> ReadTranslations(string? directory)
+	{
+		Dictionary<string, List<(string, string)>> dictionary = new Dictionary<string, List<(string, string)>>(StringComparer.OrdinalIgnoreCase);
+		if (directory == null || !Directory.Exists(directory))
+		{
+			return dictionary;
+		}
+		foreach (string item2 in Directory.EnumerateFiles(directory, "*.txt").OrderBy<string, string>((string f) => f, StringComparer.OrdinalIgnoreCase))
+		{
+			List<(string, string)> list = new List<(string, string)>();
+			string[] array = File.ReadAllLines(item2);
+			for (int num = 0; num < array.Length; num++)
+			{
+				string text = array[num].Trim();
+				if (text.Length != 0 && !text.StartsWith('#'))
+				{
+					int num2 = text.IndexOf('=');
+					if (num2 > 0)
+					{
+						string item = text.Substring(0, num2).Trim();
+						string text2 = text;
+						int num3 = num2 + 1;
+						list.Add((item, text2.Substring(num3, text2.Length - num3).Trim().Replace("\\n", "\n")));
+					}
+				}
+			}
+			dictionary[Path.GetFileNameWithoutExtension(item2)] = list;
+		}
+		return dictionary;
+	}
+
+	private static string TranslationTable(Dictionary<string, List<(string Key, string Value)>> languages)
+	{
+		string s = languages.Keys.FirstOrDefault((string k) => k.Equals("en", StringComparison.OrdinalIgnoreCase)) ?? languages.Keys.First();
+		StringBuilder stringBuilder = new StringBuilder();
+		stringBuilder.Append("namespace NeoRuneText\n{\n    public static class Table\n    {\n");
+		stringBuilder.Append("        public static string Culture;\n        public static System.Collections.Generic.Dictionary<string, string> Current = new();\n        public static System.Collections.Generic.Dictionary<string, string> Fallback = new();\n");
+		StringBuilder stringBuilder2 = stringBuilder;
+		StringBuilder stringBuilder3 = stringBuilder2;
+		StringBuilder.AppendInterpolatedStringHandler handler = new StringBuilder.AppendInterpolatedStringHandler(49, 1, stringBuilder2);
+		handler.AppendLiteral("        public const string FallbackLanguage = ");
+		handler.AppendFormatted(Lit(s));
+		handler.AppendLiteral(";\n");
+		stringBuilder3.Append(ref handler);
+		stringBuilder.Append("        public static string Pick(string culture)\n        {\n            var c = culture.ToLower();\n");
+		foreach (string key in languages.Keys)
+		{
+			stringBuilder2 = stringBuilder;
+			StringBuilder stringBuilder4 = stringBuilder2;
+			handler = new StringBuilder.AppendInterpolatedStringHandler(32, 2, stringBuilder2);
+			handler.AppendLiteral("            if (c == ");
+			handler.AppendFormatted(Lit(key.ToLowerInvariant()));
+			handler.AppendLiteral(") return ");
+			handler.AppendFormatted(Lit(key));
+			handler.AppendLiteral(";\n");
+			stringBuilder4.Append(ref handler);
+		}
+		stringBuilder.Append("            var dash = c.IndexOf(\"-\");\n            var primary = dash > 0 ? c.Substring(0, dash) : c;\n");
+		foreach (string key2 in languages.Keys)
+		{
+			stringBuilder2 = stringBuilder;
+			StringBuilder stringBuilder5 = stringBuilder2;
+			handler = new StringBuilder.AppendInterpolatedStringHandler(38, 2, stringBuilder2);
+			handler.AppendLiteral("            if (primary == ");
+			handler.AppendFormatted(Lit(key2.ToLowerInvariant()));
+			handler.AppendLiteral(") return ");
+			handler.AppendFormatted(Lit(key2));
+			handler.AppendLiteral(";\n");
+			stringBuilder5.Append(ref handler);
+		}
+		stringBuilder.Append("            return FallbackLanguage;\n        }\n");
+		stringBuilder.Append("        public static void Fill(string language, System.Collections.Generic.Dictionary<string, string> into)\n        {\n");
+		foreach (var (s2, list2) in languages)
+		{
+			stringBuilder2 = stringBuilder;
+			StringBuilder stringBuilder6 = stringBuilder2;
+			handler = new StringBuilder.AppendInterpolatedStringHandler(44, 1, stringBuilder2);
+			handler.AppendLiteral("            if (language == ");
+			handler.AppendFormatted(Lit(s2));
+			handler.AppendLiteral(")\n            {\n");
+			stringBuilder6.Append(ref handler);
+			foreach (var item3 in list2)
+			{
+				string item = item3.Item1;
+				string item2 = item3.Item2;
+				stringBuilder2 = stringBuilder;
+				StringBuilder stringBuilder7 = stringBuilder2;
+				handler = new StringBuilder.AppendInterpolatedStringHandler(27, 2, stringBuilder2);
+				handler.AppendLiteral("                into[");
+				handler.AppendFormatted(Lit(item));
+				handler.AppendLiteral("] = ");
+				handler.AppendFormatted(Lit(item2));
+				handler.AppendLiteral(";\n");
+				stringBuilder7.Append(ref handler);
+			}
+			stringBuilder.Append("            }\n");
+		}
+		stringBuilder.Append("        }\n    }\n}\n");
+		return stringBuilder.ToString();
+		static string Lit(string value)
+		{
+			return SymbolDisplay.FormatLiteral(value, quote: true);
+		}
+	}
+
+	public static string SaveName(ITypeSymbol t)
+	{
+		return new string((from c in t.ToDisplayString()
+			select (!char.IsLetterOrDigit(c)) ? '_' : c).ToArray());
+	}
+
+	private string? SaveClasses()
+	{
+		Dictionary<string, ITypeSymbol> dictionary = new Dictionary<string, ITypeSymbol>(StringComparer.Ordinal);
+		string key;
+		foreach (SyntaxTree syntaxTree in Compilation.SyntaxTrees)
+		{
+			SemanticModel semanticModel = Compilation.GetSemanticModel(syntaxTree);
+			foreach (InvocationExpressionSyntax item in syntaxTree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
+			{
+				ISymbol symbol = semanticModel.GetSymbolInfo(item).Symbol;
+				IMethodSymbol methodSymbol = symbol as IMethodSymbol;
+				bool flag;
+				if (methodSymbol != null)
+				{
+					key = symbol.Name;
+					if ((key == "Load" || key == "Save") && methodSymbol.IsGenericMethod)
+					{
+						flag = true;
+						goto IL_00d0;
+					}
+				}
+				flag = false;
+				goto IL_00d0;
+				IL_00d0:
+				if (flag && methodSymbol.ContainingType.ToDisplayString() == "NeoRune.ModSave")
+				{
+					ITypeSymbol typeSymbol = methodSymbol.TypeArguments[0];
+					if (typeSymbol != null && typeSymbol.TypeKind == TypeKind.Struct)
+					{
+						dictionary[SaveName(typeSymbol)] = typeSymbol;
+					}
+				}
+			}
+		}
+		if (dictionary.Count == 0)
+		{
+			return null;
+		}
+		StringBuilder stringBuilder = new StringBuilder("namespace NeoRuneSaves\n{\n");
+		ITypeSymbol value;
+		foreach (KeyValuePair<string, ITypeSymbol> item2 in dictionary)
+		{
+			item2.Deconstruct(out key, out value);
+			string value2 = key;
+			ITypeSymbol typeSymbol2 = value;
+			StringBuilder stringBuilder2 = stringBuilder;
+			StringBuilder stringBuilder3 = stringBuilder2;
+			StringBuilder.AppendInterpolatedStringHandler handler = new StringBuilder.AppendInterpolatedStringHandler(63, 2, stringBuilder2);
+			handler.AppendLiteral("    public class Save_");
+			handler.AppendFormatted(value2);
+			handler.AppendLiteral(" : UE.Engine.USaveGame { public ");
+			handler.AppendFormatted(typeSymbol2.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+			handler.AppendLiteral(" Data; }\n");
+			stringBuilder3.Append(ref handler);
+		}
+		stringBuilder.Append("    public static class Saves\n    {\n");
+		foreach (KeyValuePair<string, ITypeSymbol> item3 in dictionary)
+		{
+			item3.Deconstruct(out key, out value);
+			string value3 = key;
+			string value4 = value.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+			StringBuilder stringBuilder2 = stringBuilder;
+			StringBuilder stringBuilder4 = stringBuilder2;
+			StringBuilder.AppendInterpolatedStringHandler handler = new StringBuilder.AppendInterpolatedStringHandler(664, 7, stringBuilder2);
+			handler.AppendLiteral("        public static bool Load_");
+			handler.AppendFormatted(value3);
+			handler.AppendLiteral("(string name, out ");
+			handler.AppendFormatted(value4);
+			handler.AppendLiteral(" data)\n        {\n            var save = UE.Engine.UGameplayStatics.LoadGameFromSlot(NeoRune.ModSave.Slot(name), 0) as Save_");
+			handler.AppendFormatted(value3);
+			handler.AppendLiteral(";\n            if (save == null) { data = default; return false; }\n            data = save.Data;\n            return true;\n        }\n        public static bool Save_");
+			handler.AppendFormatted(value3);
+			handler.AppendLiteral("(string name, ");
+			handler.AppendFormatted(value4);
+			handler.AppendLiteral(" data)\n        {\n            var save = UE.Engine.UGameplayStatics.CreateSaveGameObject(NeoRune.Unreal.ClassOf<Save_");
+			handler.AppendFormatted(value3);
+			handler.AppendLiteral(">()) as Save_");
+			handler.AppendFormatted(value3);
+			handler.AppendLiteral(";\n            if (save == null) return false;\n            save.Data = data;\n            return UE.Engine.UGameplayStatics.SaveGameToSlot(save, NeoRune.ModSave.Slot(name), 0);\n        }\n");
+			stringBuilder4.Append(ref handler);
+		}
+		stringBuilder.Append("    }\n}\n");
+		return stringBuilder.ToString();
+	}
+
+	public int? ProfileIndex(IMethodSymbol? m)
+	{
+		if (m != null)
+		{
+			string documentationCommentId = m.OriginalDefinition.GetDocumentationCommentId();
+			if (documentationCommentId != null && profileIndex.TryGetValue(documentationCommentId, out var value))
+			{
+				return value;
+			}
+		}
+		return null;
+	}
+
+	private string ProfileCounters()
+	{
+		IEnumerable<IMethodSymbol> enumerable = (from t in Compilation.SyntaxTrees.SelectMany((SyntaxTree t) => from c in t.GetRoot().DescendantNodes().OfType<TypeDeclarationSyntax>()
+				select Compilation.GetSemanticModel(t).GetDeclaredSymbol(c)).OfType<INamedTypeSymbol>()
+			where !IsSdkClass(t) && !IsTestClass(t)
+			select t).Distinct((IEqualityComparer<INamedTypeSymbol>?)SymbolEqualityComparer.Default).SelectMany((INamedTypeSymbol t) => t.GetMembers().OfType<IMethodSymbol>()).Where(delegate(IMethodSymbol m)
+		{
+			bool flag = !m.IsAbstract && !m.IsImplicitlyDeclared && m.DeclaringSyntaxReferences.Length > 0;
+			if (flag)
+			{
+				MethodKind methodKind = m.MethodKind;
+				bool flag2 = ((methodKind == MethodKind.Constructor || (uint)(methodKind - 10) <= 2u) ? true : false);
+				flag = flag2;
+			}
+			return flag && NeoRuneExtended.Compiler.Symbols.IntrinsicId(m) == null;
+		});
+		StringBuilder stringBuilder = new StringBuilder("namespace NeoRuneProfile\n{\n    public static class Counters\n    {\n        public static long StartFrame;\n        public static double StartTime;\n        public static NeoRune.Profiler Instance;\n");
+		StringBuilder stringBuilder2 = new StringBuilder();
+		foreach (IMethodSymbol item in enumerable)
+		{
+			string documentationCommentId = item.GetDocumentationCommentId();
+			if (documentationCommentId != null && !profileIndex.ContainsKey(documentationCommentId))
+			{
+				int count = ProfiledNames.Count;
+				profileIndex[documentationCommentId] = count;
+				ProfiledNames.Add(item.ContainingType.Name + "." + ((item.MethodKind == MethodKind.Constructor) ? "new" : item.Name));
+				StringBuilder stringBuilder3 = stringBuilder;
+				StringBuilder stringBuilder4 = stringBuilder3;
+				StringBuilder.AppendInterpolatedStringHandler handler = new StringBuilder.AppendInterpolatedStringHandler(61, 2, stringBuilder3);
+				handler.AppendLiteral("        public static int C");
+				handler.AppendFormatted(count);
+				handler.AppendLiteral(";\n        public static double T");
+				handler.AppendFormatted(count);
+				handler.AppendLiteral(";\n");
+				stringBuilder4.Append(ref handler);
+				stringBuilder3 = stringBuilder2;
+				StringBuilder stringBuilder5 = stringBuilder3;
+				handler = new StringBuilder.AppendInterpolatedStringHandler(36, 3, stringBuilder3);
+				handler.AppendLiteral("            lines.Add($\"");
+				handler.AppendFormatted(count);
+				handler.AppendLiteral(" {C");
+				handler.AppendFormatted(count);
+				handler.AppendLiteral("} {T");
+				handler.AppendFormatted(count);
+				handler.AppendLiteral("}\");\n");
+				stringBuilder5.Append(ref handler);
+			}
+		}
+		stringBuilder.Append("        public static System.Collections.Generic.List<string> Snapshot()\n        {\n            var lines = new System.Collections.Generic.List<string>();\n");
+		stringBuilder.Append(stringBuilder2).Append("            return lines;\n        }\n    }\n}\n");
+		return stringBuilder.ToString();
+	}
+
+	public void WriteManifest(string path)
+	{
+		string text = references.FirstOrDefault((string r) => Path.GetFileName(r).Equals("NeoRune.Game.dll", StringComparison.OrdinalIgnoreCase));
+		string text2 = ((text != null) ? Path.Combine(Path.GetDirectoryName(text), "NeoRune.Game.json") : null);
+		JsonObject obj = new JsonObject { ["mod"] = ModName };
+		AssemblyInformationalVersionAttribute? assemblyInformationalVersionAttribute = typeof(ModCompiler).Assembly.GetCustomAttributes(typeof(AssemblyInformationalVersionAttribute), inherit: false).OfType<AssemblyInformationalVersionAttribute>().FirstOrDefault();
+		obj["neoRune"] = ((assemblyInformationalVersionAttribute != null) ? assemblyInformationalVersionAttribute.InformationalVersion.Split('+')[0] : null);
+		obj["game"] = ((text2 != null && File.Exists(text2)) ? JsonNode.Parse(File.ReadAllText(text2)) : null);
+		obj["uses"] = new JsonArray(((IEnumerable<string>)Symbols.UsedApi).Select((Func<string, JsonNode>)((string u) => u)).ToArray());
+		JsonObject jsonObject = obj;
+		string text3 = Info?.Version;
+		if (text3 != null && text3.Length > 0)
+		{
+			jsonObject["version"] = text3;
+		}
+		if (Requires.Count > 0)
+		{
+			jsonObject["requires"] = new JsonArray(((IEnumerable<string>)Requires).Select((Func<string, JsonNode>)((string r) => r)).ToArray());
+		}
+		if (Profile)
+		{
+			jsonObject["profile"] = new JsonArray(((IEnumerable<string>)ProfiledNames).Select((Func<string, JsonNode>)((string n) => n)).ToArray());
+		}
+		File.WriteAllText(path, jsonObject.ToJsonString(new JsonSerializerOptions
+		{
+			WriteIndented = true
+		}));
+	}
+
+	private static string EmbeddedSource(string name)
+	{
+		using Stream stream = typeof(ModCompiler).Assembly.GetManifestResourceStream("NeoRune.Embedded." + name) ?? throw new InvalidOperationException("the compiler is missing its built-in " + name);
+		using StreamReader streamReader = new StreamReader(stream);
+		return streamReader.ReadToEnd();
+	}
+
+	private void CheckMarkUntouched()
+	{
+		foreach (SyntaxTree syntaxTree in Compilation.SyntaxTrees)
+		{
+			if (syntaxTree.FilePath == "NeoRune (built in)/NeoRuneMark.cs")
+			{
+				continue;
+			}
+			foreach (SyntaxToken item in syntaxTree.GetRoot().DescendantTokens())
+			{
+				string valueText = item.ValueText;
+				if (valueText.Contains("NeoRuneMark", StringComparison.OrdinalIgnoreCase) || valueText.Contains("NeoRuneWatermark", StringComparison.OrdinalIgnoreCase))
+				{
+					Diagnostics.Add(ModDiagnostic.From("error", "the \"NeoRune mods loaded\" mark is part of every NeoRune mod: mods can't refer to it", item.GetLocation()));
+				}
+			}
+		}
 	}
 
 	public bool Compile(string outputDirectory)
@@ -56,13 +416,23 @@ public sealed class ModCompiler
 		{
 			return false;
 		}
+		CheckMarkUntouched();
+		if (HasErrors)
+		{
+			return false;
+		}
 		List<INamedTypeSymbol> source = (from namedTypeSymbol in Compilation.SyntaxTrees.SelectMany((SyntaxTree syntaxTree) => from c in syntaxTree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>()
 				select Compilation.GetSemanticModel(syntaxTree).GetDeclaredSymbol(c)).OfType<INamedTypeSymbol>().Distinct((IEqualityComparer<INamedTypeSymbol>?)SymbolEqualityComparer.Default)
-			where !namedTypeSymbol.IsAbstract && !namedTypeSymbol.IsStatic && Symbols.NativeBase(namedTypeSymbol) != null
+			where !namedTypeSymbol.IsAbstract && !namedTypeSymbol.IsStatic && Symbols.NativeBase(namedTypeSymbol) != null && !IsTestClass(namedTypeSymbol)
 			select namedTypeSymbol).ToList();
 		if (!source.Any((INamedTypeSymbol namedTypeSymbol) => namedTypeSymbol.Name == "ModActor"))
 		{
 			Diagnostics.Add(ModDiagnostic.From("error", "the mod needs a class named ModActor deriving from AActor (Blueprint Loader spawns it)", null));
+			return false;
+		}
+		CollectStatics();
+		if (HasErrors)
+		{
 			return false;
 		}
 		sdkClasses = source.Where(IsSdkClass).ToHashSet((IEqualityComparer<INamedTypeSymbol>?)SymbolEqualityComparer.Default);
@@ -179,6 +549,106 @@ public sealed class ModCompiler
 		return t.ContainingNamespace?.ToDisplayString() == "NeoRune";
 	}
 
+	public static bool IsTestClass(INamedTypeSymbol t)
+	{
+		for (INamedTypeSymbol namedTypeSymbol = t; namedTypeSymbol != null; namedTypeSymbol = namedTypeSymbol.ContainingType)
+		{
+			if (namedTypeSymbol.GetAttributes().Any((AttributeData a) => a.AttributeClass?.Name == "ModTestsAttribute"))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void CollectStatics()
+	{
+		Statics.Clear();
+		foreach (INamedTypeSymbol item in (from t in Compilation.SyntaxTrees.SelectMany((SyntaxTree t) => from c in t.GetRoot().DescendantNodes().OfType<TypeDeclarationSyntax>()
+				select Compilation.GetSemanticModel(t).GetDeclaredSymbol(c)).OfType<INamedTypeSymbol>()
+			where !IsSdkClass(t) && !IsTestClass(t)
+			select t).Distinct((IEqualityComparer<INamedTypeSymbol>?)SymbolEqualityComparer.Default))
+		{
+			foreach (ISymbol member in item.GetMembers())
+			{
+				ISymbol symbol = member;
+				ITypeSymbol typeSymbol;
+				IPropertySymbol propertySymbol;
+				if (symbol is IFieldSymbol fieldSymbol)
+				{
+					if (symbol.IsStatic)
+					{
+						if (!fieldSymbol.IsConst && !symbol.IsImplicitlyDeclared && fieldSymbol.AssociatedSymbol == null)
+						{
+							typeSymbol = fieldSymbol.Type;
+							goto IL_0148;
+						}
+						propertySymbol = symbol as IPropertySymbol;
+						if (propertySymbol != null)
+						{
+							goto IL_0113;
+						}
+					}
+				}
+				else
+				{
+					propertySymbol = symbol as IPropertySymbol;
+					if (propertySymbol != null && symbol.IsStatic)
+					{
+						goto IL_0113;
+					}
+				}
+				goto IL_0145;
+				IL_0113:
+				if (!item.GetMembers().OfType<IFieldSymbol>().Any((IFieldSymbol f) => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, propertySymbol)))
+				{
+					goto IL_0145;
+				}
+				typeSymbol = propertySymbol.Type;
+				goto IL_0148;
+				IL_0145:
+				typeSymbol = null;
+				goto IL_0148;
+				IL_0148:
+				ITypeSymbol typeSymbol2 = typeSymbol;
+				if (typeSymbol2 != null)
+				{
+					UType uType = Symbols.Map(typeSymbol2);
+					if (uType == null)
+					{
+						Diagnostics.Add(ModDiagnostic.From("error", "type of static '" + member.Name + "' has no Unreal equivalent", member.Locations.FirstOrDefault()));
+					}
+					else
+					{
+						Statics[member] = (item.Name + "_" + member.Name, uType);
+					}
+				}
+			}
+		}
+	}
+
+	public IEnumerable<IOperation> StaticInitializers()
+	{
+		foreach (ISymbol key in Statics.Keys)
+		{
+			foreach (SyntaxReference declaringSyntaxReference in key.DeclaringSyntaxReferences)
+			{
+				SyntaxNode syntax = declaringSyntaxReference.GetSyntax();
+				SemanticModel semanticModel = Compilation.GetSemanticModel(syntax.SyntaxTree);
+				EqualsValueClauseSyntax equalsValueClauseSyntax = ((syntax is VariableDeclaratorSyntax variableDeclaratorSyntax) ? variableDeclaratorSyntax.Initializer : ((!(syntax is PropertyDeclarationSyntax propertyDeclarationSyntax)) ? null : propertyDeclarationSyntax.Initializer));
+				EqualsValueClauseSyntax equalsValueClauseSyntax2 = equalsValueClauseSyntax;
+				if (equalsValueClauseSyntax2 != null)
+				{
+					IOperation operation = semanticModel.GetOperation(equalsValueClauseSyntax2);
+					if (operation != null)
+					{
+						yield return operation;
+					}
+				}
+			}
+		}
+	}
+
 	private List<UserStructBuilder> ModStructs()
 	{
 		List<UserStructBuilder> result = new List<UserStructBuilder>();
@@ -187,20 +657,10 @@ public sealed class ModCompiler
 		{
 			Run(t, delegate
 			{
-				IMethodSymbol methodSymbol = t.GetMembers().OfType<IMethodSymbol>().FirstOrDefault(delegate(IMethodSymbol m)
-				{
-					bool flag = !m.IsImplicitlyDeclared;
-					if (flag)
-					{
-						MethodKind methodKind = m.MethodKind;
-						bool flag2 = (uint)(methodKind - 11) <= 1u;
-						flag = !flag2;
-					}
-					return flag;
-				});
+				IMethodSymbol methodSymbol = t.GetMembers().OfType<IMethodSymbol>().FirstOrDefault((IMethodSymbol m) => !m.IsImplicitlyDeclared && m.MethodKind == MethodKind.Constructor && m.Parameters.Length == 0);
 				if (methodSymbol != null)
 				{
-					throw new CompileError("struct " + t.Name + " can only hold fields: methods and constructors aren't supported in mod structs (put them in a class)", methodSymbol.Locations.FirstOrDefault());
+					throw new CompileError($"struct {t.Name}: a constructor without parameters is not supported (new {t.Name}() gives the default value)", methodSymbol.Locations.FirstOrDefault());
 				}
 				string package = Symbols.ModPackage(t);
 				string guidText = NeoRuneExtended.Compiler.Symbols.AssetGuid(t);
@@ -376,7 +836,7 @@ public sealed class ModCompiler
 		{
 			return value;
 		}
-		IMethodSymbol methodSymbol = (Compilation.GetTypeByMetadataName("UE.Engine." + className) ?? Compilation.GetTypeByMetadataName("UE.UMG." + className))?.GetMembers().OfType<IMethodSymbol>().FirstOrDefault((IMethodSymbol x) => string.Equals(Symbols.Function(x)?.Name, name, StringComparison.OrdinalIgnoreCase));
+		IMethodSymbol methodSymbol = (Compilation.GetTypeByMetadataName("UE.Engine." + className) ?? Compilation.GetTypeByMetadataName("UE.UMG." + className))?.GetMembers().OfType<IMethodSymbol>().FirstOrDefault((IMethodSymbol x) => string.Equals(Symbols.Function(x, use: false)?.Name, name, StringComparison.OrdinalIgnoreCase));
 		return libraryCache[(className, name)] = ((methodSymbol != null) ? Symbols.Function(methodSymbol) : null);
 	}
 

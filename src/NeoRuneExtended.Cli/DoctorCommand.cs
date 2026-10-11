@@ -142,14 +142,23 @@ internal static class DoctorCommand
 				Ok("Mod loader: " + Path.GetRelativePath(text, Path.GetDirectoryName(text3)));
 			}
 		}
-		foreach (string item in Directory.EnumerateDirectories(text2).OrderBy<string, string>((string d) => d, StringComparer.OrdinalIgnoreCase))
+		List<ModManifest> manifests = (from d in Directory.EnumerateDirectories(text2)
+			select Directory.EnumerateFiles(d, "*.neorune.json").FirstOrDefault()).OfType<string>().Select(ModManifest.Read).OfType<ModManifest>()
+			.ToList();
+		List<string> installedFolders = Directory.EnumerateDirectories(text2).Select(Path.GetFileName).OfType<string>()
+			.ToList();
+		foreach (string item in ModManifest.CheckRequirements(manifests, installedFolders))
 		{
-			string fileName = Path.GetFileName(item);
+			Fail(item);
+		}
+		foreach (string item2 in Directory.EnumerateDirectories(text2).OrderBy<string, string>((string d) => d, StringComparer.OrdinalIgnoreCase))
+		{
+			string fileName = Path.GetFileName(item2);
 			if (IsLoader(fileName))
 			{
 				continue;
 			}
-			List<string> files = Directory.EnumerateFiles(item).Select(Path.GetFileName).ToList();
+			List<string> files = Directory.EnumerateFiles(item2).Select(Path.GetFileName).ToList();
 			List<string> list = (from f in files
 				where f.EndsWith(".pak") || f.EndsWith(".utoc") || f.EndsWith(".ucas")
 				select Path.GetFileNameWithoutExtension(f)).Distinct().ToList();

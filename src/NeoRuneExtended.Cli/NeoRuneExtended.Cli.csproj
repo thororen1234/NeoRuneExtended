@@ -20,6 +20,8 @@
   <ItemGroup>
     <!-- retoc and repak pack the mod: the tool looks for them next to itself. -->
     <None Include="$(RepoRoot)tools/*.exe" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- The game API of each known build: "neorunex update" compares them to tell which mods a game update affects. -->
+    <None Include="$(RepoRoot)bindings/api/*.json.gz" Link="api/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Include="$(RepoRoot)third-party/*LICENSE*" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

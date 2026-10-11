@@ -59,17 +59,35 @@ namespace NeoRune
             var player = World.PlayerController(this);
             if (player == null && !above) return;
             if (player != null) SetOwningPlayer(player);
-            // SetPositionInViewport resets the anchors: it comes first.
-            SetPositionInViewport(shownAt, true);
-            SetAnchorsInViewport(new UE.Slate.FAnchors { Minimum = shownAnchor, Maximum = shownAnchor });
-            SetAlignmentInViewport(shownAnchor);
             if (above) AddToViewport(shownZOrder);
             else AddToPlayerScreen(shownZOrder);
+            Place();
+        }
+
+        /// <summary>
+        /// Puts the widget at its anchor point. The game ignores viewport anchors and alignment (widgets end up placed from
+        /// the top left), so the top-left position is worked out here, in UI units: the anchor's point of the screen, plus the
+        /// offset, minus the widget's own size times the anchor. Done again with every check, so it follows the widget's size
+        /// and the window.
+        /// </summary>
+        void Place()
+        {
+            var scale = UWidgetLayoutLibrary.GetViewportScale(this);
+            if (scale <= 0) return;
+            var screen = UWidgetLayoutLibrary.GetViewportSize(this);
+            ForceLayoutPrepass();   // its size, before the first frame lays it out
+            var size = GetDesiredSize();
+            SetPositionInViewport(new FVector2D
+            {
+                X = shownAnchor.X * (screen.X / scale - size.X) + shownAt.X,
+                Y = shownAnchor.Y * (screen.Y / scale - size.Y) + shownAt.Y,
+            }, false);
         }
 
         void KeepShown()
         {
             if (!IsInViewport()) Attach();
+            else Place();
         }
     }
 }

@@ -107,13 +107,13 @@ public class ModActor : AActor
     {
         var tracker = GameUI.AddToSlot(this, GameSlots.QuestTracker, Unreal.ClassOf<TestSlot>(), 0);
         var system = GameUI.AddToSlot(this, GameSlots.SystemMenu, Unreal.ClassOf<TestSlot>(), 0);
-        Log.Write($"F6: TestSlot in the quest tracker ({GameUI.SlotWidget(this, tracker) != null}) and the system menu slot ({GameUI.SlotWidget(this, system) != null})");
+        Log.Write($"F6: TestSlot in the quest tracker ({tracker?.Widget != null}) and the system menu slot ({system?.Widget != null})");
     }
 
     void OpenMenu()
     {
         var layer = World.LevelName(this).StartsWith("Menu") ? GameLayers.Menu : GameLayers.InGameMenu;
-        var menu = GameUI.Push(this, layer, Unreal.ClassOf<TestMenu>());
+        var menu = GameUI.Open(this, layer, Unreal.ClassOf<TestMenu>());
         Log.Write($"F7: TestMenu on {layer}: {(menu != null ? "opened, activated " + menu.IsActivated() : "not opened")}");
     }
 }

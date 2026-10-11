@@ -32,4 +32,10 @@ internal sealed class MethodPlan
 	public UType? ReturnType { get; set; }
 
 	public bool Compiled { get; set; }
+
+	public bool Coroutine { get; set; }
+
+	public string StateName => Name + "__state";
+
+	public List<(IParameterSymbol Param, string Name, UType Type)> CoroutineParams { get; } = new List<(IParameterSymbol, string, UType)>();
 }

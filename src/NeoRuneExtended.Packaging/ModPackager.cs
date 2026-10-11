@@ -9,6 +9,8 @@ namespace NeoRuneExtended.Packaging;
 
 public sealed class ModPackager
 {
+	public const string ManifestExtension = ".neorune.json";
+
 	public string ToolsDirectory { get; }
 
 	public ModPackager(string toolsDirectory)
@@ -24,7 +26,7 @@ public sealed class ModPackager
 		}
 	}
 
-	public string Pack(string modName, string assetsDirectory, string outputDirectory, string tempDirectory)
+	public string Pack(string modName, string assetsDirectory, string outputDirectory, string tempDirectory, string? imagesDirectory = null)
 	{
 		string path = Path.Combine("Dungeons", "Content", "Mods", modName);
 		string text = Path.Combine(tempDirectory, "Staging");
@@ -70,20 +72,40 @@ public sealed class ModPackager
 				File.Copy(Path.Combine(text3, path3), Path.Combine(text4, path3));
 			}
 		}
-		Directory.CreateDirectory(outputDirectory);
-		string text5 = Path.Combine(outputDirectory, modName + "_P");
-		array = new string[3] { ".pak", ".utoc", ".ucas" };
-		foreach (string text6 in array)
+		if (imagesDirectory != null && Directory.Exists(imagesDirectory))
 		{
-			if (File.Exists(text5 + text6))
+			foreach (string item2 in Directory.EnumerateFiles(imagesDirectory, "*", SearchOption.AllDirectories).Where(delegate(string f)
 			{
-				File.Delete(text5 + text6);
+				switch (Path.GetExtension(f).ToLowerInvariant())
+				{
+				case ".png":
+				case ".jpg":
+				case ".jpeg":
+					return true;
+				default:
+					return false;
+				}
+			}))
+			{
+				string text5 = Path.Combine(text4, "Images", Path.GetRelativePath(imagesDirectory, item2));
+				Directory.CreateDirectory(Path.GetDirectoryName(text5));
+				File.Copy(item2, text5);
 			}
 		}
-		Run("retoc.exe", "to-zen", "--version", "UE5_6", text, text5 + ".utoc");
-		File.Delete(text5 + ".pak");
-		Run("repak.exe", "pack", "-q", "--version", "V11", text2, text5 + ".pak");
-		return text5;
+		Directory.CreateDirectory(outputDirectory);
+		string text6 = Path.Combine(outputDirectory, modName + "_P");
+		array = new string[3] { ".pak", ".utoc", ".ucas" };
+		foreach (string text7 in array)
+		{
+			if (File.Exists(text6 + text7))
+			{
+				File.Delete(text6 + text7);
+			}
+		}
+		Run("retoc.exe", "to-zen", "--version", "UE5_6", text, text6 + ".utoc");
+		File.Delete(text6 + ".pak");
+		Run("repak.exe", "pack", "-q", "--version", "V11", text2, text6 + ".pak");
+		return text6;
 	}
 
 	public static string Install(string stem, string modName, string gameDirectory)
@@ -98,6 +120,10 @@ public sealed class ModPackager
 		foreach (string text2 in array)
 		{
 			File.Copy(stem + text2, Path.Combine(text, Path.GetFileName(stem) + text2), overwrite: true);
+		}
+		if (File.Exists(stem + ".neorune.json"))
+		{
+			File.Copy(stem + ".neorune.json", Path.Combine(text, Path.GetFileName(stem) + ".neorune.json"), overwrite: true);
 		}
 		return text;
 	}
